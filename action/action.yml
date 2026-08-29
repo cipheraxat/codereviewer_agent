@@ -1,0 +1,67 @@
+name: "CodeReview PR Agent"
+description: "Run multi-agent structured PR review with RAG context and ensemble verification"
+branding:
+  icon: search
+  color: blue
+
+inputs:
+  llm_api_key:
+    description: "API key for OpenAI or Anthropic"
+    required: true
+  llm_provider:
+    description: "LLM provider: openai or anthropic"
+    required: false
+    default: "openai"
+  llm_model:
+    description: "Optional model override"
+    required: false
+    default: ""
+  config_path:
+    description: "Path to reviewer.yaml"
+    required: false
+    default: "reviewer.yaml"
+  repo_root:
+    description: "Repository root for context retrieval"
+    required: false
+    default: "."
+  dry_run:
+    description: "If true, do not post GitHub review comments"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install codereview
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install "${{ github.action_path }}/.."
+
+    - name: Run PR review
+      shell: bash
+      env:
+        LLM_API_KEY: ${{ inputs.llm_api_key }}
+        LLM_PROVIDER: ${{ inputs.llm_provider }}
+        LLM_MODEL: ${{ inputs.llm_model }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        ARGS=(review-pr "${{ github.repository }}#${{ github.event.pull_request.number }}" --repo-root "${{ inputs.repo_root }}" --output review-report.json)
+        if [[ -f "${{ inputs.config_path }}" ]]; then
+          ARGS+=(--config "${{ inputs.config_path }}")
+        fi
+        if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+          ARGS+=(--dry-run)
+        fi
+        codereview "${ARGS[@]}"
+
+    - name: Upload review report
+      uses: actions/upload-artifact@v4
+      with:
+        name: review-report
+        path: review-report.json

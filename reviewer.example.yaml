@@ -1,0 +1,50 @@
+# Copy to reviewer.yaml in your repo root and customize for your team.
+
+languages:
+  - python
+  - typescript
+  - javascript
+
+ignore_globs:
+  - "**/node_modules/**"
+  - "**/.venv/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/*.lock"
+  - "**/vendor/**"
+
+severity_threshold: medium  # low | medium | high | critical
+
+custom_rules:
+  - id: no-raw-sql
+    description: Do not use string-concatenated SQL; use parameterized queries or an ORM.
+    pattern: "execute\\(.*\\+.*\\)|f\"SELECT|f'SELECT"
+    severity: high
+    category: security
+
+  - id: http-timeout
+    description: Outbound HTTP calls must set an explicit timeout.
+    pattern: "requests\\.(get|post|put|delete|patch)\\([^)]*\\)"
+    severity: medium
+    category: quality
+
+  - id: no-bare-except
+    description: Avoid bare except clauses; catch specific exceptions.
+    pattern: "except:\\s*$"
+    severity: low
+    category: quality
+
+team_conventions: |
+  - Prefer small, focused functions under 40 lines.
+  - Add or update tests for behavior changes.
+  - Document public APIs and non-obvious logic.
+  - Never commit secrets, API keys, or credentials.
+
+context:
+  max_snippets: 12
+  max_snippet_chars: 2000
+  neighbor_depth: 1
+
+posting:
+  min_confidence: 0.55
+  max_inline_comments: 25

@@ -1,0 +1,25 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run multi-agent PR review
+        uses: ./action
+        with:
+          llm_api_key: ${{ secrets.LLM_API_KEY }}
+          llm_provider: openai
+          config_path: reviewer.yaml
+          dry_run: ${{ vars.CODEREVIEW_DRY_RUN || 'false' }}
