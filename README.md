@@ -2,12 +2,42 @@
 
 Production-style PR review pipeline for GitHub: retrieve relevant repo context, run parallel security and pattern agents, ensemble the findings, and post structured review comments.
 
-## Architecture
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Multi-agent PR review architecture diagram" width="900"/>
+</p>
 
-```text
-PR -> Context Engine (RAG-lite) -> Security Agent  \
-                                 -> Pattern Agent   -> Ensemble -> GitHub review
-```
+## How it works
+
+<p align="center">
+  <img src="docs/images/data-flow.svg" alt="End-to-end PR review data flow" width="900"/>
+</p>
+
+1. **Trigger** — PR opened/updated or `codereview review-pr` from CLI
+2. **Ingest** — fetch changed files and unified diff from GitHub
+3. **Retrieve** — RAG-lite context from repo checkout + `reviewer.yaml` team rules
+4. **Analyze** — Security + Pattern agents run in parallel (LangGraph)
+5. **Ensemble** — dedupe, filter by confidence/severity, assign verdict
+6. **Publish** — structured PR review + inline comments + `review-report.json`
+
+<p align="center">
+  <img src="docs/images/langgraph-pipeline.svg" alt="LangGraph fan-out fan-in orchestration" width="720"/>
+</p>
+
+## Example output on GitHub
+
+<p align="center">
+  <img src="docs/images/github-review-example.svg" alt="Example GitHub PR review with inline comments" width="900"/>
+</p>
+
+Every finding is structured — not just prose:
+
+| Field | Example |
+|---|---|
+| category | `security` |
+| severity | `high` |
+| file / line | `src/app/auth.ts:42` |
+| confidence | `0.85` |
+| suggestion | Use env vars instead of hardcoded secrets |
 
 ## Features
 
@@ -18,6 +48,7 @@ PR -> Context Engine (RAG-lite) -> Security Agent  \
 - Works offline with `review-diff` (no GitHub API)
 - GitHub Action for company repos
 - Team rules via `reviewer.yaml` (procedural memory)
+- OpenRouter, OpenAI, or Anthropic for LLM-backed analysis
 
 ## Quick start
 
@@ -85,39 +116,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: your-org/codereviewer_agent/action@main
+      - uses: cipheraxat/codereviewer_agent/action@main
         with:
           llm_api_key: ${{ secrets.LLM_API_KEY }}
           llm_provider: openrouter
           llm_model: openai/gpt-4o-mini
           config_path: reviewer.yaml
-          github_token: ${{ steps.app-token.outputs.token }}
+          dry_run: "false"
 ```
 
-### Post as `codereview-agent[bot]` (not `github-actions[bot]`)
-
-The default `${{ github.token }}` always posts reviews as **github-actions[bot]**. To rename the reviewer identity, use a **GitHub App** named `codereview-agent`:
-
-1. Create the app from the manifest (one click):  
-   https://github.com/settings/apps/new?manifest=https://raw.githubusercontent.com/cipheraxat/codereviewer_agent/main/github-app-manifest.json
-2. Install it on your repo (e.g. CopilotPulse) with **Pull requests: Read & write**
-3. Add repo secrets:
-   - `CODEREVIEW_APP_ID` — App ID from the app settings page
-   - `CODEREVIEW_APP_PRIVATE_KEY` — full PEM contents of the generated private key
-4. Add these workflow steps **before** checkout:
-
-```yaml
-      - name: Generate codereview-agent token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.CODEREVIEW_APP_ID }}
-          private-key: ${{ secrets.CODEREVIEW_APP_PRIVATE_KEY }}
-```
-
-5. Pass `github_token: ${{ steps.app-token.outputs.token }}` to the action (see example above)
-
-Reviews will then appear as **codereview-agent[bot]**.
+Reviews post as **github-actions[bot]** using the default `GITHUB_TOKEN`.
 
 ### Company setup checklist
 
@@ -154,6 +162,11 @@ src/codereview/
     ensemble.py
 action/
   action.yml
+docs/images/
+  architecture.svg
+  data-flow.svg
+  langgraph-pipeline.svg
+  github-review-example.svg
 ```
 
 ## Resume bullet
@@ -162,6 +175,7 @@ Built a multi-agent GitHub PR reviewer (LangGraph) with RAG-style context retrie
 
 ## Roadmap (v2)
 
+- JIRA / Confluence external context (ticket-aware reviews)
 - GitHub App webhook ingress
 - Postgres/pgvector semantic memory
 - Redis job queue

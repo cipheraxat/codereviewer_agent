@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-label="Example GitHub PR review output">
+  <rect width="900" height="520" rx="12" fill="#0d1117"/>
+  <rect x="0" y="0" width="900" height="48" fill="#161b22" stroke="#30363d"/>
+  <circle cx="24" cy="24" r="8" fill="#f85149"/>
+  <circle cx="48" cy="24" r="8" fill="#d29922"/>
+  <circle cx="72" cy="24" r="8" fill="#3fb950"/>
+  <text x="450" y="30" text-anchor="middle" fill="#c9d1d9" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13">github.com/org/repo/pull/42</text>
+
+  <text x="28" y="84" fill="#f0f6fc" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" font-weight="700">Test: live PR review agent comments</text>
+  <text x="28" y="108" fill="#8b949e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">github-actions[bot] requested changes · reviewed just now</text>
+
+  <rect x="28" y="128" width="844" height="110" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="44" y="152" fill="#c9d1d9" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Automated multi-agent review found 8 issue(s): 2 critical, 2 high, 4 medium</text>
+  <text x="44" y="172" fill="#8b949e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">Overall confidence: 0.87 · Latency: 6076 ms</text>
+  <text x="44" y="200" fill="#ff7b72" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="700">1. [CRITICAL / security] Hardcoded API Key</text>
+  <text x="44" y="218" fill="#8b949e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12">2. [HIGH / security] SQL Injection Risk</text>
+
+  <rect x="28" y="260" width="844" height="220" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="44" y="286" fill="#58a6ff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">src/app/auth.ts</text>
+
+  <rect x="44" y="302" width="812" height="28" fill="#1f2937"/>
+  <text x="56" y="320" fill="#f85149" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">+ const api_key = "sk-live-secret";</text>
+
+  <rect x="44" y="338" width="812" height="72" rx="6" fill="#21262d" stroke="#30363d"/>
+  <text x="56" y="360" fill="#f0f6fc" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="700">[critical] Hardcoded API Key</text>
+  <text x="56" y="378" fill="#c9d1d9" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11">The API key is hardcoded in source. Use environment variables.</text>
+  <text x="56" y="396" fill="#8b949e" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11">Suggestion: load from secret manager or CI secrets.</text>
+
+  <text x="450" y="500" text-anchor="middle" fill="#6e7681" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11">Example output  structured summary + inline comments on changed lines</text>
+</svg>

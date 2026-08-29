@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 420" role="img" aria-label="Multi-agent PR review architecture">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <rect width="920" height="420" rx="16" fill="url(#bg)"/>
+  <text x="460" y="36" text-anchor="middle" fill="#f8fafc" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="22" font-weight="700">Multi-Agent PR Review Architecture</text>
+  <text x="460" y="58" text-anchor="middle" fill="#94a3b8" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13">Context engine ’ parallel specialists ’ ensemble verifier ’ GitHub</text>
+
+  <rect x="40" y="100" width="130" height="56" rx="10" fill="#334155" filter="url(#shadow)"/>
+  <text x="105" y="124" text-anchor="middle" fill="#e2e8f0" font-size="13" font-weight="600">GitHub PR</text>
+  <text x="105" y="142" text-anchor="middle" fill="#94a3b8" font-size="11">diff + metadata</text>
+
+  <rect x="210" y="88" width="150" height="80" rx="10" fill="#f59e0b" filter="url(#shadow)"/>
+  <text x="285" y="118" text-anchor="middle" fill="#1e293b" font-size="13" font-weight="700">Context Engine</text>
+  <text x="285" y="136" text-anchor="middle" fill="#1e293b" font-size="11">RAG-lite retrieval</text>
+  <text x="285" y="152" text-anchor="middle" fill="#1e293b" font-size="11">changed files + neighbors</text>
+
+  <rect x="400" y="88" width="160" height="80" rx="10" fill="#475569" filter="url(#shadow)"/>
+  <text x="480" y="118" text-anchor="middle" fill="#f8fafc" font-size="13" font-weight="700">Relevant Context</text>
+  <text x="480" y="136" text-anchor="middle" fill="#cbd5e1" font-size="11">ranked code snippets</text>
+  <text x="480" y="152" text-anchor="middle" fill="#cbd5e1" font-size="11">+ team rules (yaml)</text>
+
+  <rect x="300" y="220" width="150" height="72" rx="10" fill="#fda4af" filter="url(#shadow)"/>
+  <text x="375" y="248" text-anchor="middle" fill="#881337" font-size="13" font-weight="700">Security Agent</text>
+  <text x="375" y="266" text-anchor="middle" fill="#881337" font-size="11">secrets, injection,</text>
+  <text x="375" y="280" text-anchor="middle" fill="#881337" font-size="11">authz, unsafe defaults</text>
+
+  <rect x="470" y="220" width="150" height="72" rx="10" fill="#fda4af" filter="url(#shadow)"/>
+  <text x="545" y="248" text-anchor="middle" fill="#881337" font-size="13" font-weight="700">Pattern Agent</text>
+  <text x="545" y="266" text-anchor="middle" fill="#881337" font-size="11">conventions, tests,</text>
+  <text x="545" y="280" text-anchor="middle" fill="#881337" font-size="11">docs, code smells</text>
+
+  <rect x="385" y="330" width="150" height="56" rx="10" fill="#7c3aed" filter="url(#shadow)"/>
+  <text x="460" y="354" text-anchor="middle" fill="#f5f3ff" font-size="13" font-weight="700">Ensemble Verifier</text>
+  <text x="460" y="372" text-anchor="middle" fill="#ddd6fe" font-size="11">dedupe · rank · verdict</text>
+
+  <rect x="760" y="300" width="130" height="56" rx="10" fill="#16a34a" filter="url(#shadow)"/>
+  <text x="825" y="324" text-anchor="middle" fill="#f0fdf4" font-size="13" font-weight="700">GitHub Review</text>
+  <text x="825" y="342" text-anchor="middle" fill="#dcfce7" font-size="11">summary + inline</text>
+
+  <line x1="170" y1="128" x2="208" y2="128" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="360" y1="128" x2="398" y2="128" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="480" y1="168" x2="375" y2="218" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="480" y1="168" x2="545" y2="218" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="375" y1="292" x2="420" y2="330" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="545" y1="292" x2="500" y2="330" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="535" y1="358" x2="758" y2="328" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+</svg>
