@@ -52,7 +52,7 @@ class SupabaseVectorStore:
         try:
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(
-                    f"{self.url}/rest/v1/{self.config.table}",
+                    f"{self.url}/rest/v1/{self.config.table}?on_conflict=repo,path,chunk_index,content_hash",
                     headers=self._headers(),
                     json=rows,
                 )
@@ -81,7 +81,7 @@ class SupabaseVectorStore:
         try:
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(
-                    f"{self.url}/rest/v1/{self.config.table}",
+                    f"{self.url}/rest/v1/{self.config.table}?on_conflict=repo,path,chunk_index,content_hash",
                     headers=self._headers(),
                     json=rows,
                 )
