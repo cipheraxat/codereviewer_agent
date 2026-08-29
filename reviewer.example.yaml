@@ -44,8 +44,9 @@ context:
   max_snippets: 12
   max_snippet_chars: 2000
   neighbor_depth: 1
+  min_vector_snippets_before_fallback: 2
 
-# Optional JIRA / Confluence context (fail-open; BAU unchanged when disabled)
+# JIRA / Confluence — indexed into Supabase when external_context.enabled: true
 external_context:
   enabled: false
   max_snippets: 4
@@ -55,22 +56,32 @@ external_context:
     base_url: yourcompany.atlassian.net
     projects: [CP, ENG]
     max_issues: 3
+    max_index_issues: 100
+    # index_jql: "project = CP AND updated >= -30d ORDER BY updated DESC"
   confluence:
     enabled: true
+    spaces: [ENG, PLATFORM]
     max_pages: 2
+    max_index_pages: 50
     follow_jira_remote_links: true
 
-# Optional Supabase pgvector semantic retrieval (hybrid with BM25-lite)
+# Unified RAG: batch-index all sources, query vectors at review time
 vector:
   enabled: false
+  unified_rag: true
   embedding_model: openai/text-embedding-3-small
+  indexing:
+    sources: [code, jira, confluence]
   supabase:
     enabled: true
     table: code_embeddings
-    index_on_review: true
+    index_on_review: false
     match_threshold: 0.55
-    vector_top_k: 8
+    vector_top_k: 12
 
 posting:
   min_confidence: 0.55
   max_inline_comments: 25
+
+ensemble:
+  llm_verify: true

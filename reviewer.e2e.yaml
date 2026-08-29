@@ -1,0 +1,59 @@
+# E2E live flow: Supabase + GitHub PR review (no JIRA/Confluence)
+
+severity_threshold: low
+
+ignore_globs:
+  - "**/node_modules/**"
+  - "**/.venv/**"
+  - "**/.venv311/**"
+  - "**/dist/**"
+  - "**/build/**"
+
+context:
+  max_snippets: 12
+  max_snippet_chars: 2000
+  neighbor_depth: 1
+
+# JIRA / Confluence intentionally disabled for this flow
+external_context:
+  enabled: false
+  jira:
+    enabled: false
+  confluence:
+    enabled: false
+
+vector:
+  enabled: true
+  unified_rag: true
+  embedding_model: openai/text-embedding-3-small
+  indexing:
+    sources: [code]
+    code_globs:
+      - "e2e_sandbox/**/*.py"
+      - "src/codereview/**/*.py"
+      - "benchmarks/golden/**/*.py"
+  supabase:
+    enabled: true
+    table: code_embeddings
+    index_on_review: false
+    match_threshold: 0.45
+    vector_top_k: 10
+
+ensemble:
+  llm_verify: true
+
+posting:
+  min_confidence: 0.50
+  max_inline_comments: 25
+
+custom_rules:
+  - id: no-raw-sql
+    description: Do not use string-concatenated SQL.
+    pattern: "execute\\(.*\\+.*\\)|f\"SELECT|f'SELECT"
+    severity: high
+    category: security
+
+team_conventions: |
+  - Never commit secrets or API keys.
+  - Use parameterized SQL for database access.
+  - Remove debug logging from auth paths before merge.

@@ -11,9 +11,15 @@ from codereview.models import CodeSnippet
 
 logger = logging.getLogger(__name__)
 
+SOURCE_REASON_PREFIX = {
+    "code": "vector_match:code",
+    "jira": "vector_match:jira",
+    "confluence": "vector_match:confluence",
+}
+
 
 class SupabaseVectorStore:
-    """Supabase pgvector store for code chunk embeddings."""
+    """Supabase pgvector store for unified knowledge embeddings."""
 
     def __init__(self, config: SupabaseConfig, *, url: Optional[str] = None, key: Optional[str] = None) -> None:
         self.config = config
@@ -32,63 +38,62 @@ class SupabaseVectorStore:
             "Prefer": "resolution=merge-duplicates",
         }
 
-    def upsert_chunks(self, repo: str, path: str, chunks: list[str]) -> None:
+    def upsert_embeddings(
+        self,
+        repo: str,
+        path: str,
+        chunks: list[str],
+        embeddings: list[list[float]],
+        *,
+        source: str = "code",
+    ) -> int:
         if not self.available or not chunks:
-            return
+            return 0
 
-        rows = []
-        for index, chunk in enumerate(chunks):
-            digest = content_hash(chunk)
-            rows.append(
-                {
-                    "repo": repo,
-                    "path": path,
-                    "chunk_index": index,
-                    "content_hash": digest,
-                    "content": chunk[: self.config.max_chunk_chars],
-                }
-            )
-
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(
-                    f"{self.url}/rest/v1/{self.config.table}?on_conflict=repo,path,chunk_index,content_hash",
-                    headers=self._headers(),
-                    json=rows,
-                )
-                if response.status_code not in {200, 201}:
-                    logger.warning("Supabase upsert metadata failed: %s %s", response.status_code, response.text)
-        except httpx.HTTPError as exc:
-            logger.warning("Supabase upsert failed: %s", exc)
-
-    def upsert_embeddings(self, repo: str, path: str, chunks: list[str], embeddings: list[list[float]]) -> None:
-        if not self.available:
-            return
-
-        rows = []
+        rows_with_source = []
+        rows_without_source = []
         for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            rows.append(
-                {
-                    "repo": repo,
-                    "path": path,
-                    "chunk_index": index,
-                    "content_hash": content_hash(chunk),
-                    "content": chunk[: self.config.max_chunk_chars],
-                    "embedding": embedding,
-                }
-            )
+            base = {
+                "repo": repo,
+                "path": path,
+                "chunk_index": index,
+                "content_hash": content_hash(chunk),
+                "content": chunk[: self.config.max_chunk_chars],
+                "embedding": embedding,
+            }
+            rows_without_source.append(base)
+            rows_with_source.append({**base, "source": source})
 
+        return self._post_rows(rows_with_source, fallback_rows=rows_without_source)
+
+    def _post_rows(self, rows: list[dict], *, fallback_rows: list[dict] | None = None) -> int:
         try:
-            with httpx.Client(timeout=30.0) as client:
+            with httpx.Client(timeout=60.0) as client:
                 response = client.post(
                     f"{self.url}/rest/v1/{self.config.table}?on_conflict=repo,path,chunk_index,content_hash",
                     headers=self._headers(),
                     json=rows,
                 )
-                if response.status_code not in {200, 201}:
-                    logger.warning("Supabase embedding upsert failed: %s %s", response.status_code, response.text)
+                if response.status_code in {200, 201}:
+                    return len(rows)
+                if (
+                    fallback_rows is not None
+                    and response.status_code == 400
+                    and "source" in response.text
+                ):
+                    logger.info("Supabase table missing source column; retrying upsert without source")
+                    response = client.post(
+                        f"{self.url}/rest/v1/{self.config.table}?on_conflict=repo,path,chunk_index,content_hash",
+                        headers=self._headers(),
+                        json=fallback_rows,
+                    )
+                    if response.status_code in {200, 201}:
+                        return len(fallback_rows)
+                logger.warning("Supabase embedding upsert failed: %s %s", response.status_code, response.text)
+                return 0
         except httpx.HTTPError as exc:
             logger.warning("Supabase embedding upsert failed: %s", exc)
+            return 0
 
     def similarity_search(self, repo: str, query_embedding: list[float], limit: int) -> list[CodeSnippet]:
         if not self.available:
@@ -117,12 +122,14 @@ class SupabaseVectorStore:
 
         snippets: list[CodeSnippet] = []
         for row in rows:
+            source = row.get("source") or "code"
+            reason = SOURCE_REASON_PREFIX.get(source, f"vector_match:{source}")
             snippets.append(
                 CodeSnippet(
                     path=row.get("path", "unknown"),
                     content=row.get("content", ""),
                     score=float(row.get("similarity", 0.0)) * 10.0,
-                    reason="supabase_vector_match",
+                    reason=reason,
                 )
             )
         return snippets

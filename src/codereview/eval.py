@@ -75,7 +75,12 @@ def evaluate_case(
     *,
     repo_root: Path,
 ) -> CaseResult:
-    eval_config = config.model_copy(update={"severity_threshold": Severity.LOW})
+    eval_config = config.model_copy(
+    update={
+      "severity_threshold": Severity.LOW,
+      "ensemble": config.ensemble.model_copy(update={"llm_verify": False}),
+    }
+  )
     diff_text = case.diff_path.read_text()
     pr = synthetic_pr_from_diff(diff_text, title=f"Eval case {case.name}")
     fixture_root = case.repo_fixture or repo_root

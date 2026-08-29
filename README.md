@@ -13,11 +13,12 @@ Production-style PR review pipeline for GitHub: retrieve relevant repo context, 
 </p>
 
 1. **Trigger** — PR opened/updated or `codereview review-pr` from CLI
-2. **Ingest** — fetch changed files and unified diff from GitHub
-3. **Retrieve** — hybrid context (BM25 + optional Supabase vectors + optional JIRA/Confluence)
-4. **Analyze** — Security + Pattern agents run in parallel (LangGraph)
-5. **Ensemble** — dedupe, filter by confidence/severity, assign verdict
-6. **Publish** — structured PR review + inline comments + `review-report.json`
+2. **Index** (batch/cron) — `codereview index-knowledge` embeds repo code + JIRA + Confluence into Supabase
+3. **Ingest** — fetch changed files and unified diff from GitHub
+4. **Retrieve** — changed files + unified vector search over pre-indexed knowledge (`unified_rag: true`)
+5. **Analyze** — Security + Pattern agents run in parallel (LangGraph)
+6. **Ensemble** — dedupe, filter by confidence/severity, assign verdict
+7. **Publish** — structured PR review + inline comments + `review-report.json`
 
 <p align="center">
   <img src="docs/images/langgraph-pipeline.svg" alt="LangGraph fan-out fan-in orchestration" width="720"/>
@@ -27,7 +28,52 @@ Production-style PR review pipeline for GitHub: retrieve relevant repo context, 
 
 ## Data flow (detailed)
 
-### End-to-end pipeline
+```mermaid
+flowchart TD
+  subgraph indexPhase [Indexing phase - batch or cron]
+    codeWalk[Walk_repo_code]
+    jiraBulk[JIRA_project_search]
+    confBulk[Confluence_space_pages]
+    chunk[Chunk_documents]
+    embed[Embed_via_LLM]
+  end
+
+  subgraph store [Supabase pgvector]
+    db[(code_embeddings)]
+  end
+
+  subgraph reviewPhase [Review phase - per PR]
+    prEvent[GitHub_PR_or_CLI]
+    ingest[Fetch_PR_diff]
+    changed[Changed_files_always]
+    query[Embed_PR_query]
+    search[Vector_similarity_search]
+    agents[Security_and_Pattern_agents]
+    output[PR_comments_and_report]
+  end
+
+  codeWalk --> chunk
+  jiraBulk --> chunk
+  confBulk --> chunk
+  chunk --> embed --> db
+
+  prEvent --> ingest --> changed
+  ingest --> query --> search
+  db --> search
+  changed --> agents
+  search --> agents --> output
+```
+
+### Index knowledge (run before reviews)
+
+```bash
+# One-time or scheduled (see .github/workflows/knowledge-index.yml)
+codereview index-knowledge --repo owner/repo --repo-root . --config reviewer.yaml
+```
+
+Requires `vector.enabled: true`, Supabase credentials, and `LLM_API_KEY`. When `external_context.enabled: true`, JIRA projects and Confluence spaces are indexed alongside repo code.
+
+### End-to-end pipeline (review time)
 
 ```mermaid
 flowchart TD
@@ -113,7 +159,16 @@ The pipeline normalizes all inputs into one object:
 
 ### Step 3 — Hybrid context engine
 
-`ContextEngine.build_context()` merges up to **five sources**, ranks them by score, and returns the top N snippets (`context.max_snippets`, default 12).
+When `vector.unified_rag: true` (default), review-time retrieval is:
+
+1. **Changed files** — always included directly
+2. **Unified vector search** — semantic search over pre-indexed code, JIRA, and Confluence chunks in Supabase
+
+Live JIRA/Confluence API calls are **not** made during review. Run `codereview index-knowledge` (or the `knowledge-index.yml` workflow) to refresh the index.
+
+Set `vector.unified_rag: false` to restore the legacy path: BM25 neighbors + optional `index_on_review` + live JIRA/Confluence fetch.
+
+`ContextEngine.build_context()` merges sources, ranks by score, and returns the top N snippets (`context.max_snippets`, default 12).
 
 ```mermaid
 flowchart LR

@@ -1,0 +1,5 @@
+{
+  "page_id": "auth-security-policy",
+  "title": "Authentication Security Policy",
+  "content": "Company policy for auth-related changes:\n\n- Secrets and API keys must be loaded from environment variables or a secrets manager, never committed to the repository.\n- Use parameterized queries for all database access; string interpolation in SQL is prohibited.\n- Auth modules must not contain print/debug statements in production code paths.\n- PRs touching src/app/auth.py require security review and must reference the linked JIRA ticket."
+}

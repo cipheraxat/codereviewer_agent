@@ -4,7 +4,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-from github import Github
+from github import Auth, Github
 from github.GithubException import GithubException
 from github.PullRequest import PullRequest
 
@@ -20,7 +20,7 @@ class PostedReview:
 
 class GitHubClient:
     def __init__(self, token: str) -> None:
-        self._gh = Github(token)
+        self._gh = Github(auth=Auth.Token(token))
 
     def fetch_pull_request(self, owner: str, repo: str, number: int) -> PullRequestContext:
         repository = self._gh.get_repo(f"{owner}/{repo}")
@@ -53,6 +53,7 @@ class GitHubClient:
         *,
         dry_run: bool = False,
         bot_marker: str = "<!-- codereview-agent -->",
+        max_inline_comments: int = 25,
     ) -> PostedReview | None:
         if report.pr is None:
             raise ValueError("Review report is missing PR context")
@@ -63,7 +64,7 @@ class GitHubClient:
         commit_sha = report.commit_sha or report.pr.head_sha
 
         body = self._format_review_body(report, bot_marker)
-        comments = self._format_inline_comments(report)
+        comments = self._format_inline_comments(report, max_inline_comments=max_inline_comments)
 
         if dry_run:
             return None
@@ -77,13 +78,42 @@ class GitHubClient:
             return PostedReview(review_id=existing.id, commit_sha=commit_sha, updated=True)
 
         event = self._map_verdict(report.verdict)
-        review = pr.create_review(
-            commit=repository.get_commit(commit_sha),
-            body=body,
-            event=event,
-            comments=comments,
-        )
+        try:
+            review = pr.create_review(
+                commit=repository.get_commit(commit_sha),
+                body=body,
+                event=event,
+                comments=comments,
+            )
+        except GithubException as exc:
+            if event == "REQUEST_CHANGES" and "own pull request" in str(exc).lower():
+                review = pr.create_review(
+                    commit=repository.get_commit(commit_sha),
+                    body=body,
+                    event="COMMENT",
+                    comments=comments,
+                )
+            else:
+                raise
         return PostedReview(review_id=review.id, commit_sha=commit_sha, updated=False)
+
+    def create_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        title: str,
+        body: str,
+        head: str,
+        base: str = "main",
+    ) -> int:
+        repository = self._gh.get_repo(f"{owner}/{repo}")
+        pr = repository.create_pull(title=title, body=body, head=head, base=base)
+        return pr.number
+
+    def get_default_branch(self, owner: str, repo: str) -> str:
+        repository = self._gh.get_repo(f"{owner}/{repo}")
+        return repository.default_branch
 
     def _find_existing_review(self, pr: PullRequest, commit_sha: str, bot_marker: str):
         for review in pr.get_reviews():
@@ -112,6 +142,9 @@ class GitHubClient:
         if report.metrics.estimated_cost_usd:
             lines.append(f"Estimated LLM cost: ${report.metrics.estimated_cost_usd:.4f}")
 
+        if report.metrics.llm_degraded:
+            lines.append("LLM status: degraded (heuristic fallback used for one or more steps)")
+
         if report.findings:
             lines.append("")
             lines.append("## Structured findings")
@@ -130,13 +163,17 @@ class GitHubClient:
                 lines.append(f"   - Suggestion: {finding.suggestion}")
         return "\n".join(lines)
 
-    def _format_inline_comments(self, report: ReviewReport) -> list[dict[str, str | int]]:
+    def _format_inline_comments(
+        self,
+        report: ReviewReport,
+        *,
+        max_inline_comments: int,
+    ) -> list[dict[str, str | int]]:
         comments: list[dict[str, str | int]] = []
-        max_comments = 25
         for finding in report.findings:
             if not finding.file or not finding.line:
                 continue
-            if len(comments) >= max_comments:
+            if len(comments) >= max_inline_comments:
                 break
             comments.append(
                 {

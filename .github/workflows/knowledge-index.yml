@@ -1,0 +1,39 @@
+name: Knowledge Index
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install codereview
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Index knowledge into Supabase
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'openrouter' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
+          ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
+          ATLASSIAN_DOMAIN: ${{ secrets.ATLASSIAN_DOMAIN }}
+        run: |
+          if [[ ! -f reviewer.yaml ]]; then
+            cp reviewer.example.yaml reviewer.yaml
+          fi
+          codereview index-knowledge --repo "${{ github.repository }}" --repo-root .

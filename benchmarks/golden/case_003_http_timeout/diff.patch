@@ -1,0 +1,11 @@
+diff --git a/src/api/client.py b/src/api/client.py
+index 1111111..2222222 100644
+--- a/src/api/client.py
++++ b/src/api/client.py
+@@ -1,5 +1,6 @@
+ import requests
+ 
+ def fetch_user(user_id: str):
+-    return requests.get(f"https://api.example.com/users/{user_id}")
++    response = requests.get(f"https://api.example.com/users/{user_id}")
++    return response.json()

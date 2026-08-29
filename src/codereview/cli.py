@@ -11,6 +11,8 @@ from codereview.config import ReviewerConfig, Settings
 from codereview.github_client import GitHubClient, parse_pr_ref, synthetic_pr_from_diff
 from codereview.eval import run_benchmark
 from codereview.graph import ReviewOrchestrator
+from codereview.demo_pipeline import run_demo_pipeline
+from codereview.knowledge_indexer import KnowledgeIndexer
 from codereview.models import ReviewReport
 
 app = typer.Typer(help="Multi-agent GitHub PR reviewer")
@@ -86,7 +88,11 @@ def review_pr(
     _print_report(report)
 
     if post and token and not dry_run:
-        posted = gh.post_review(report, dry_run=False)
+        posted = gh.post_review(
+            report,
+            dry_run=False,
+            max_inline_comments=config.posting.max_inline_comments,
+        )
         if posted:
             action = "updated" if posted.updated else "created"
             console.print(f"[green]Review {action} on commit {posted.commit_sha}[/green]")
@@ -141,6 +147,91 @@ def eval_benchmark(
             str(case["false_negatives"]),
         )
     console.print(table)
+
+
+@app.command("demo")
+def demo(
+    diff_file: Path = typer.Option(
+        Path("benchmarks/golden/case_001_secret_sql/diff.patch"),
+        "--diff",
+        help="Unified diff to review in the demo pipeline",
+    ),
+    repo_root: Path = typer.Option(
+        Path("benchmarks/golden/case_001_secret_sql/repo"),
+        "--repo-root",
+        help="Local repo checkout used for code indexing",
+    ),
+    fixtures_dir: Path = typer.Option(
+        Path("tests/fixtures/knowledge"),
+        "--fixtures-dir",
+        help="Mock JIRA/Confluence JSON fixtures",
+    ),
+    output: Path = typer.Option(Path("demo-report.json"), "--output", help="Where to write JSON report"),
+    show_context: bool = typer.Option(True, "--show-context/--no-show-context"),
+) -> None:
+    """Run end-to-end demo: mock JIRA/Confluence → in-memory index → PR review (no APIs)."""
+    if not diff_file.exists():
+        raise typer.BadParameter(f"Diff file not found: {diff_file}")
+    if not repo_root.exists():
+        raise typer.BadParameter(f"Repo root not found: {repo_root}")
+
+    result = run_demo_pipeline(
+        diff_file=diff_file,
+        repo_root=repo_root,
+        fixtures_dir=fixtures_dir,
+    )
+
+    _save_report(result.report, output)
+    console.print("[bold cyan]Demo pipeline complete[/bold cyan] (mock JIRA/Confluence, in-memory vectors)")
+    console.print(
+        f"Indexed {result.index_stats.chunks} chunks from {result.index_stats.documents} documents "
+        f"({', '.join(f'{k}={v}' for k, v in sorted(result.index_stats.by_source.items()))})"
+    )
+
+    if show_context:
+        console.print("\n[bold]Retrieved context[/bold]")
+        context_table = Table("Path", "Source", "Score", "Reason")
+        for snippet in result.context_snippets:
+            source = snippet.reason.split(":", 1)[-1] if ":" in snippet.reason else "-"
+            context_table.add_row(snippet.path, source, f"{snippet.score:.2f}", snippet.reason)
+        console.print(context_table)
+
+    _print_report(result.report)
+
+
+@app.command("index-knowledge")
+def index_knowledge(
+    repo_slug: str = typer.Option(..., "--repo", help="Knowledge partition slug, e.g. owner/repo"),
+    repo_root: Path = typer.Option(Path("."), "--repo-root", help="Local checkout to index"),
+    config_path: Path | None = typer.Option(None, "--config", help="Path to reviewer.yaml"),
+    sources: str = typer.Option(
+        "",
+        "--sources",
+        help="Comma-separated sources: code,jira,confluence (defaults to reviewer.yaml vector.indexing.sources)",
+    ),
+) -> None:
+    """Index repo code + JIRA + Confluence into Supabase for unified RAG retrieval."""
+    config = _load_config(config_path)
+    settings = Settings()
+    source_list = [s.strip() for s in sources.split(",") if s.strip()] or None
+
+    indexer = KnowledgeIndexer(repo_root=repo_root.resolve(), config=config, settings=settings)
+    try:
+        stats = indexer.run(repo_slug, sources=source_list)
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    console.print(
+        f"[bold green]Indexed {stats.chunks} chunks[/bold green] from {stats.documents} documents "
+        f"into [cyan]{stats.repo}[/cyan]"
+    )
+    if stats.by_source:
+        table = Table("Source", "Chunks")
+        for source, count in sorted(stats.by_source.items()):
+            table.add_row(source, str(count))
+        console.print(table)
+    if stats.skipped_sources:
+        console.print(f"[yellow]Skipped sources:[/yellow] {', '.join(stats.skipped_sources)}")
 
 
 @app.command("version")

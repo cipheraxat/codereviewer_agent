@@ -35,12 +35,14 @@ class ReviewOrchestrator:
         repo_root: Path,
         config: ReviewerConfig,
         settings: Settings | None = None,
+        *,
+        context_engine: ContextEngine | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.config = config
         self.settings = settings or Settings()
         self.llm = LLMClient(self.settings)
-        self.context_engine = ContextEngine(repo_root, config, settings=self.settings)
+        self.context_engine = context_engine or ContextEngine(repo_root, config, settings=self.settings)
         self.security_agent = SecurityAgent()
         self.pattern_agent = PatternAgent()
         self.ensemble_agent = EnsembleAgent()
@@ -113,7 +115,7 @@ class ReviewOrchestrator:
 
     def _ensemble(self, state: ReviewState) -> dict:
         combined = state["security_findings"] + state["pattern_findings"]
-        findings, summary, confidence, verdict = self.ensemble_agent.aggregate(
+        findings, summary, confidence, verdict, llm_degraded = self.ensemble_agent.aggregate(
             combined,
             state["config"],
             state["pr"],
@@ -132,6 +134,7 @@ class ReviewOrchestrator:
                 estimated_cost_usd=self.llm.estimate_cost_usd(),
                 llm_provider=state["llm_provider"],
                 llm_model=state["llm_model"],
+                llm_degraded=llm_degraded,
             ),
         )
         return {"all_findings": findings, "report": report}

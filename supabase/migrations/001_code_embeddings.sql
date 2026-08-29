@@ -10,6 +10,7 @@ create table if not exists public.code_embeddings (
   chunk_index integer not null default 0,
   content_hash text not null,
   content text not null,
+  source text not null default 'code',
   embedding vector(1536),
   updated_at timestamptz not null default now(),
   unique (repo, path, chunk_index, content_hash)
@@ -29,14 +30,16 @@ create or replace function public.match_code_embeddings(
 returns table (
   path text,
   content text,
-  similarity double precision
+  similarity double precision,
+  source text
 )
 language sql stable
 as $$
   select
     ce.path,
     ce.content,
-    1 - (ce.embedding <=> query_embedding) as similarity
+    1 - (ce.embedding <=> query_embedding) as similarity,
+    ce.source
   from public.code_embeddings ce
   where ce.repo = match_repo
     and ce.embedding is not null

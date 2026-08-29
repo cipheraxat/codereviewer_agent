@@ -1,0 +1,11 @@
+{
+  "expected": [
+    {
+      "title_contains": "timeout",
+      "severity": "medium",
+      "file": "src/api/client.py",
+      "category": "quality"
+    }
+  ],
+  "should_not_find": []
+}

@@ -1,26 +1,21 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from codereview.config import ReviewerConfig
+from codereview.diff_utils import line_for_pattern
+from codereview.finding_dedupe import dedupe_findings
 from codereview.llm import LLMClient, findings_from_payload
 from codereview.models import Finding, FindingCategory, PullRequestContext, Severity
 
+logger = logging.getLogger(__name__)
 
 PATTERN_SYSTEM = """You are a senior software engineer reviewing code quality and team conventions.
 Return JSON only with shape:
 {"findings":[{"category":"quality|testing|documentation|performance","severity":"low|medium|high|critical","title":"...","file":"path or null","line":123,"rationale":"...","suggestion":"...","confidence":0.0-1.0}]}
 Focus on maintainability, missing tests, unclear APIs, error handling, and convention violations.
 Only report issues grounded in the provided diff/context."""
-
-
-def first_changed_line(patch: str) -> int | None:
-    for line in patch.splitlines():
-        if line.startswith("@@"):
-            match = re.search(r"\+(\d+)", line)
-            if match:
-                return int(match.group(1))
-    return None
 
 
 def build_review_prompt(pr: PullRequestContext, context_block: str, config: ReviewerConfig) -> str:
@@ -35,13 +30,7 @@ def build_review_prompt(pr: PullRequestContext, context_block: str, config: Revi
 
 
 def merge_findings(left: list[Finding], right: list[Finding]) -> list[Finding]:
-    seen = {f.dedupe_key() for f in left}
-    merged = list(left)
-    for finding in right:
-        if finding.dedupe_key() not in seen:
-            merged.append(finding)
-            seen.add(finding.dedupe_key())
-    return merged
+    return dedupe_findings(left + right)
 
 
 class PatternAgent:
@@ -63,7 +52,8 @@ class PatternAgent:
             payload = llm.complete_json(PATTERN_SYSTEM, user)
             llm_findings = findings_from_payload(payload, self.name)
             return merge_findings(heuristic, llm_findings)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Pattern LLM review failed, using heuristics only: %s", exc)
             return heuristic
 
     def _heuristic_scan(self, pr: PullRequestContext, config: ReviewerConfig) -> list[Finding]:
@@ -75,14 +65,14 @@ class PatternAgent:
         ]
         for path, patch in pr.patches.items():
             for pattern, title, severity in quality_patterns:
-                if re.search(pattern, patch):
+                if re.search(pattern, patch, re.MULTILINE):
                     findings.append(
                         Finding(
                             category=FindingCategory.QUALITY,
                             severity=severity,
                             title=title,
                             file=path,
-                            line=first_changed_line(patch),
+                            line=line_for_pattern(patch, pattern),
                             rationale=f"Pattern `{pattern}` matched in PR diff.",
                             suggestion="Remove debug statements or track follow-up work in an issue.",
                             confidence=0.7,
@@ -93,14 +83,14 @@ class PatternAgent:
             if rule.category == "security":
                 continue
             for path, patch in pr.patches.items():
-                if re.search(rule.pattern, patch):
+                if re.search(rule.pattern, patch, re.MULTILINE):
                     findings.append(
                         Finding(
                             category=FindingCategory.QUALITY,
                             severity=rule.severity,
                             title=rule.description,
                             file=path,
-                            line=first_changed_line(patch),
+                            line=line_for_pattern(patch, rule.pattern),
                             rationale=f"Matched custom rule `{rule.id}`.",
                             suggestion="Align implementation with team conventions.",
                             confidence=0.75,
