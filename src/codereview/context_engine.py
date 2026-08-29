@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import fnmatch
+import logging
 import re
 from collections import Counter
 from pathlib import Path
+from typing import Optional
 
-from codereview.config import ReviewerConfig
+from codereview.config import ReviewerConfig, Settings
+from codereview.embeddings import EmbeddingClient
+from codereview.external_context import ExternalContextFetcher, repo_slug
 from codereview.models import CodeSnippet, PullRequestContext
+from codereview.vector_store import SupabaseVectorStore
 
+logger = logging.getLogger(__name__)
 
 CODE_EXTENSIONS = {
     ".py",
@@ -42,12 +48,44 @@ def _is_code_file(path: Path) -> bool:
     return path.suffix.lower() in CODE_EXTENSIONS
 
 
-class ContextEngine:
-    """RAG-lite retrieval over changed files and local repo neighbors."""
+def _chunk_text(text: str, max_chars: int, overlap: int) -> list[str]:
+    if len(text) <= max_chars:
+        return [text]
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(len(text), start + max_chars)
+        chunks.append(text[start:end])
+        if end >= len(text):
+            break
+        start = max(0, end - overlap)
+    return chunks
 
-    def __init__(self, repo_root: Path, config: ReviewerConfig) -> None:
+
+class ContextEngine:
+    """Hybrid retrieval: BM25-lite + optional Supabase vectors + external JIRA/Confluence."""
+
+    def __init__(
+        self,
+        repo_root: Path,
+        config: ReviewerConfig,
+        settings: Optional[Settings] = None,
+    ) -> None:
         self.repo_root = repo_root.resolve()
         self.config = config
+        self.settings = settings or Settings()
+        self.embeddings = EmbeddingClient(self.settings)
+        self.vector_store = SupabaseVectorStore(
+            config.vector.supabase,
+            url=self.settings.supabase_url,
+            key=self.settings.supabase_key,
+        )
+        self.external_fetcher = ExternalContextFetcher(
+            config.external_context,
+            atlassian_email=self.settings.atlassian_email,
+            atlassian_api_token=self.settings.atlassian_api_token,
+            atlassian_domain=self.settings.atlassian_domain or config.external_context.jira.base_url,
+        )
 
     def build_context(self, pr: PullRequestContext) -> list[CodeSnippet]:
         changed = [f for f in pr.changed_files if not _should_ignore(f, self.config.ignore_globs)]
@@ -64,6 +102,7 @@ class ContextEngine:
                     score=10.0,
                     reason="changed_in_pr",
                 )
+                self._maybe_index_file(pr, rel_path, content)
 
         for rel_path in changed:
             for neighbor in self._neighbor_paths(rel_path):
@@ -84,9 +123,55 @@ class ContextEngine:
                     score=score,
                     reason="neighbor_or_keyword_match",
                 )
+                self._maybe_index_file(pr, neighbor, content)
+
+        if self._vector_enabled():
+            for snippet in self._vector_search(pr, query_terms):
+                if snippet.path not in candidates or candidates[snippet.path].score < snippet.score:
+                    candidates[snippet.path] = snippet
+
+        for snippet in self.external_fetcher.fetch(pr):
+            candidates[snippet.path] = snippet
 
         ranked = sorted(candidates.values(), key=lambda s: s.score, reverse=True)
         return ranked[: self.config.context.max_snippets]
+
+    def _vector_enabled(self) -> bool:
+        return (
+            self.config.vector.enabled
+            and self.config.vector.supabase.enabled
+            and self.vector_store.available
+            and self.embeddings.available
+        )
+
+    def _maybe_index_file(self, pr: PullRequestContext, rel_path: str, content: str) -> None:
+        if not self._vector_enabled() or not self.config.vector.supabase.index_on_review:
+            return
+        try:
+            chunks = _chunk_text(
+                content,
+                self.config.vector.supabase.max_chunk_chars,
+                self.config.vector.supabase.chunk_overlap,
+            )
+            embeddings = self.embeddings.embed_texts(chunks)
+            self.vector_store.upsert_embeddings(repo_slug(pr), rel_path, chunks, embeddings)
+        except Exception as exc:
+            logger.warning("Vector indexing skipped for %s: %s", rel_path, exc)
+
+    def _vector_search(self, pr: PullRequestContext, query_terms: Counter[str]) -> list[CodeSnippet]:
+        query = " ".join(term for term, _ in query_terms.most_common(40))
+        if not query.strip():
+            query = pr.title
+        try:
+            query_embedding = self.embeddings.embed_query(query)
+            return self.vector_store.similarity_search(
+                repo_slug(pr),
+                query_embedding,
+                self.config.vector.supabase.vector_top_k,
+            )
+        except Exception as exc:
+            logger.warning("Vector search skipped: %s", exc)
+            return []
 
     def _build_query_terms(self, pr: PullRequestContext, changed_files: list[str]) -> Counter[str]:
         terms: list[str] = []
@@ -115,6 +200,8 @@ class ContextEngine:
         for _ in range(depth):
             for path in list(neighbors):
                 parent_dir = (self.repo_root / path).parent
+                if not parent_dir.exists():
+                    continue
                 for child in parent_dir.iterdir():
                     if child.is_file() and _is_code_file(child):
                         candidate = str(child.relative_to(self.repo_root))

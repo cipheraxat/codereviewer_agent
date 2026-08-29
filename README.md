@@ -42,7 +42,9 @@ Every finding is structured — not just prose:
 ## Features
 
 - Structured findings: category, severity, file, line, rationale, suggestion, confidence
-- RAG-lite context retrieval from changed files and neighbors (no vector DB required in v1)
+- Hybrid context retrieval: BM25-lite + optional **Supabase pgvector** semantic search
+- Optional **JIRA / Confluence** context (fail-open, disabled by default — BAU unchanged)
+- Benchmark eval suite with precision/recall on golden labeled PR diffs
 - Parallel specialist agents with LangGraph fan-out/fan-in
 - Ensemble verifier dedupes, filters, and assigns verdict
 - Works offline with `review-diff` (no GitHub API)
@@ -93,6 +95,79 @@ codereview review-pr owner/repo#123 --repo-root . --output review-report.json
 
 Use `--dry-run` to generate the report without posting comments.
 
+## Hybrid context (BM25 + Supabase vectors)
+
+By default, context retrieval uses **BM25-lite** over changed files and neighbors (zero infra).
+
+Enable semantic retrieval with **Supabase pgvector** (free tier works):
+
+1. Create a [Supabase](https://supabase.com) project
+2. Run [`supabase/migrations/001_code_embeddings.sql`](supabase/migrations/001_code_embeddings.sql) in the SQL editor
+3. Set secrets / env vars:
+
+```bash
+export SUPABASE_URL=https://xxxx.supabase.co
+export SUPABASE_SERVICE_ROLE_KEY=eyJ...
+```
+
+4. Enable in `reviewer.yaml`:
+
+```yaml
+vector:
+  enabled: true
+  supabase:
+    enabled: true
+    index_on_review: true
+    vector_top_k: 8
+```
+
+On each review, changed files are embedded and stored; similar chunks are retrieved for the PR query. If Supabase is unavailable, the agent **falls back to BM25** automatically.
+
+## JIRA / Confluence context (opt-in, fail-open)
+
+Disabled by default — existing workflows keep working.
+
+```yaml
+external_context:
+  enabled: true
+  jira:
+    enabled: true
+    base_url: yourcompany.atlassian.net
+    projects: [CP]
+  confluence:
+    enabled: true
+```
+
+PR convention:
+
+```markdown
+## JIRA
+[CP-123] Add session export
+
+## Confluence
+https://yourcompany.atlassian.net/wiki/spaces/ENG/pages/123456/Design
+```
+
+Secrets (GitHub Actions or local):
+
+```bash
+export ATLASSIAN_EMAIL=you@company.com
+export ATLASSIAN_API_TOKEN=...
+export ATLASSIAN_DOMAIN=yourcompany.atlassian.net
+```
+
+If credentials are missing or JIRA is down, the review **continues with repo-only context**.
+
+## Benchmark evaluation
+
+Measure precision/recall on labeled golden diffs:
+
+```bash
+codereview eval --benchmark-dir benchmarks/golden --output benchmarks/results.json
+```
+
+See [`benchmarks/README.md`](benchmarks/README.md) to add more cases (target 20+ real PRs over time).
+
 ## GitHub Action (company install)
 
 Add to your company repo:
@@ -140,6 +215,7 @@ Reviews post as **github-actions[bot]** using the default `GITHUB_TOKEN`.
 ```bash
 codereview review-pr owner/repo#123 [--no-post] [--dry-run] [--config reviewer.yaml]
 codereview review-diff path/to/changes.patch [--title "My change"]
+codereview eval [--benchmark-dir benchmarks/golden] [--output benchmarks/results.json]
 codereview version
 ```
 
@@ -175,10 +251,8 @@ Built a multi-agent GitHub PR reviewer (LangGraph) with RAG-style context retrie
 
 ## Roadmap (v2)
 
-- JIRA / Confluence external context (ticket-aware reviews)
-- GitHub App webhook ingress
-- Postgres/pgvector semantic memory
-- Redis job queue
+- Webhook ingress service (FastAPI + Redis queue)
+- Episodic review memory across PRs
 - TimescaleDB observability for cost/latency trends
 
 ## License

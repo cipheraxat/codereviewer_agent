@@ -45,6 +45,32 @@ context:
   max_snippet_chars: 2000
   neighbor_depth: 1
 
+# Optional JIRA / Confluence context (fail-open; BAU unchanged when disabled)
+external_context:
+  enabled: false
+  max_snippets: 4
+  max_chars_per_source: 3000
+  jira:
+    enabled: true
+    base_url: yourcompany.atlassian.net
+    projects: [CP, ENG]
+    max_issues: 3
+  confluence:
+    enabled: true
+    max_pages: 2
+    follow_jira_remote_links: true
+
+# Optional Supabase pgvector semantic retrieval (hybrid with BM25-lite)
+vector:
+  enabled: false
+  embedding_model: openai/text-embedding-3-small
+  supabase:
+    enabled: true
+    table: code_embeddings
+    index_on_review: true
+    match_threshold: 0.55
+    vector_top_k: 8
+
 posting:
   min_confidence: 0.55
   max_inline_comments: 25

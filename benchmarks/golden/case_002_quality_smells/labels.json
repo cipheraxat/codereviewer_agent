@@ -1,0 +1,19 @@
+{
+  "expected": [
+    {
+      "title_contains": "TODO",
+      "severity": "low",
+      "file": "src/utils/logger.ts",
+      "category": "quality"
+    },
+    {
+      "title_contains": "Debug logging",
+      "severity": "low",
+      "file": "src/utils/logger.ts",
+      "category": "quality"
+    }
+  ],
+  "should_not_find": [
+    "hardcoded secret"
+  ]
+}

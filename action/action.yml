@@ -54,6 +54,11 @@ runs:
         LLM_PROVIDER: ${{ inputs.llm_provider }}
         LLM_MODEL: ${{ inputs.llm_model }}
         GITHUB_TOKEN: ${{ inputs.github_token != '' && inputs.github_token || github.token }}
+        ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
+        ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
+        ATLASSIAN_DOMAIN: ${{ secrets.ATLASSIAN_DOMAIN }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       run: |
         ARGS=(review-pr "${{ github.repository }}#${{ github.event.pull_request.number }}" --repo-root "${{ inputs.repo_root }}" --output review-report.json)
         if [[ -f "${{ inputs.config_path }}" ]]; then

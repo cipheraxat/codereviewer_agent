@@ -27,3 +27,6 @@ jobs:
         run: |
           codereview review-diff tests/fixtures/sample_diff.patch --repo-root . --output /tmp/review-report.json
           test -f /tmp/review-report.json
+
+      - name: Run benchmark eval
+        run: codereview eval --benchmark-dir benchmarks/golden --output benchmarks/results.json

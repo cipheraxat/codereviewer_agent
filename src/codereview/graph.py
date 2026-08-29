@@ -40,7 +40,7 @@ class ReviewOrchestrator:
         self.config = config
         self.settings = settings or Settings()
         self.llm = LLMClient(self.settings)
-        self.context_engine = ContextEngine(repo_root, config)
+        self.context_engine = ContextEngine(repo_root, config, settings=self.settings)
         self.security_agent = SecurityAgent()
         self.pattern_agent = PatternAgent()
         self.ensemble_agent = EnsembleAgent()

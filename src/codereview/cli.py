@@ -9,6 +9,7 @@ from rich.table import Table
 
 from codereview.config import ReviewerConfig, Settings
 from codereview.github_client import GitHubClient, parse_pr_ref, synthetic_pr_from_diff
+from codereview.eval import run_benchmark
 from codereview.graph import ReviewOrchestrator
 from codereview.models import ReviewReport
 
@@ -104,10 +105,42 @@ def review_diff(
     diff_text = diff_file.read_text(encoding="utf-8")
     pr_context = synthetic_pr_from_diff(diff_text, title=title)
 
-    orchestrator = ReviewOrchestrator(repo_root=repo_root.resolve(), config=config)
+    orchestrator = ReviewOrchestrator(repo_root=repo_root.resolve(), config=config, settings=Settings())
     report = orchestrator.run(pr_context)
     _save_report(report, output)
     _print_report(report)
+
+
+@app.command("eval")
+def eval_benchmark(
+    benchmark_dir: Path = typer.Option(Path("benchmarks/golden"), "--benchmark-dir"),
+    config_path: Path | None = typer.Option(None, "--config"),
+    output: Path = typer.Option(Path("benchmarks/results.json"), "--output"),
+    repo_root: Path = typer.Option(Path("."), "--repo-root"),
+) -> None:
+    """Run precision/recall evaluation against golden labeled PR diffs."""
+    config = _load_config(config_path)
+    settings = Settings()
+    results = run_benchmark(benchmark_dir.resolve(), config, settings, repo_root=repo_root.resolve())
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(results, indent=2))
+
+    summary = results["summary"]
+    console.print(
+        f"[bold]Benchmark complete[/bold] — cases: {summary['case_count']} | "
+        f"avg precision: {summary['precision']} | avg recall: {summary['recall']}"
+    )
+    table = Table("Case", "Precision", "Recall", "TP", "FP", "FN")
+    for case in results["cases"]:
+        table.add_row(
+            case["name"],
+            str(case["precision"]),
+            str(case["recall"]),
+            str(case["true_positives"]),
+            str(case["false_positives"]),
+            str(case["false_negatives"]),
+        )
+    console.print(table)
 
 
 @app.command("version")

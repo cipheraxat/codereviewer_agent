@@ -17,4 +17,5 @@ venv/
 htmlcov/
 *.log
 review-report.json
+benchmarks/results.json
 .DS_Store

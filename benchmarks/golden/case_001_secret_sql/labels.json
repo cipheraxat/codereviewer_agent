@@ -1,0 +1,19 @@
+{
+  "expected": [
+    {
+      "title_contains": "hardcoded secret",
+      "severity": "high",
+      "file": "src/app/auth.py",
+      "category": "security"
+    },
+    {
+      "title_contains": "SQL",
+      "severity": "high",
+      "file": "src/app/auth.py",
+      "category": "security"
+    }
+  ],
+  "should_not_find": [
+    "unrelated performance regression"
+  ]
+}
