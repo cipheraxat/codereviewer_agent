@@ -29,4 +29,15 @@ jobs:
           test -f /tmp/review-report.json
 
       - name: Run benchmark eval
-        run: codereview eval --benchmark-dir benchmarks/golden --output benchmarks/results.json
+        run: |
+          codereview eval --benchmark-dir benchmarks/golden --config reviewer.example.yaml --output benchmarks/results.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          results = json.loads(Path("benchmarks/results.json").read_text())
+          summary = results["summary"]
+          assert summary["case_count"] >= 4, summary
+          assert summary["recall"] >= 0.9, summary
+          assert summary["precision"] >= 0.65, summary
+          print("Benchmark gate passed:", summary)
+          PY

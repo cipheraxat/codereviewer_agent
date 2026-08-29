@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from typing import Any
 
 from codereview.config import Settings
 from codereview.models import Finding, FindingCategory, Severity
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -24,11 +28,20 @@ class LLMClient:
         if not self.available:
             raise RuntimeError("LLM_API_KEY is not set")
 
-        if self.provider == "anthropic":
-            return self._anthropic_json(system, user)
-        if self.provider == "openrouter":
-            return self._openrouter_json(system, user)
-        return self._openai_json(system, user)
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                if self.provider == "anthropic":
+                    return self._anthropic_json(system, user)
+                if self.provider == "openrouter":
+                    return self._openrouter_json(system, user)
+                return self._openai_json(system, user)
+            except Exception as exc:
+                last_error = exc
+                if attempt < 2:
+                    logger.warning("LLM request failed (attempt %s/3): %s", attempt + 1, exc)
+                    time.sleep(0.5 * (attempt + 1))
+        raise RuntimeError(f"LLM request failed after retries: {last_error}") from last_error
 
     def _anthropic_json(self, system: str, user: str) -> dict[str, Any]:
         import anthropic
@@ -99,6 +112,7 @@ class LLMClient:
 
 def findings_from_payload(payload: dict[str, Any], agent: str) -> list[Finding]:
     findings: list[Finding] = []
+    skipped = 0
     for item in payload.get("findings", []):
         try:
             findings.append(
@@ -115,6 +129,9 @@ def findings_from_payload(payload: dict[str, Any], agent: str) -> list[Finding]:
                     rule_id=item.get("rule_id"),
                 )
             )
-        except (KeyError, ValueError):
-            continue
+        except (KeyError, ValueError) as exc:
+            skipped += 1
+            logger.debug("Skipped malformed LLM finding from %s: %s", agent, exc)
+    if skipped:
+        logger.warning("Skipped %s malformed finding(s) from %s agent", skipped, agent)
     return findings

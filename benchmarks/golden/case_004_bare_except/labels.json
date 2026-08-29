@@ -1,0 +1,11 @@
+{
+  "expected": [
+    {
+      "title_contains": "bare except",
+      "severity": "low",
+      "file": "src/worker/job.py",
+      "category": "quality"
+    }
+  ],
+  "should_not_find": []
+}

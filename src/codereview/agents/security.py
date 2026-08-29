@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
 import re
 
-from codereview.agents.pattern import build_review_prompt, first_changed_line, merge_findings
+from codereview.agents.pattern import build_review_prompt, merge_findings
 from codereview.config import ReviewerConfig
+from codereview.diff_utils import line_for_pattern
 from codereview.llm import LLMClient, findings_from_payload
 from codereview.models import Finding, FindingCategory, PullRequestContext, Severity
 
+logger = logging.getLogger(__name__)
 
 SECURITY_SYSTEM = """You are a senior application security engineer reviewing a pull request.
 Return JSON only with shape:
@@ -34,7 +37,8 @@ class SecurityAgent:
             payload = llm.complete_json(SECURITY_SYSTEM, user)
             llm_findings = findings_from_payload(payload, self.name)
             return merge_findings(heuristic, llm_findings)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Security LLM review failed, using heuristics only: %s", exc)
             return heuristic
 
     def _heuristic_scan(self, pr: PullRequestContext, config: ReviewerConfig) -> list[Finding]:
@@ -47,14 +51,14 @@ class SecurityAgent:
         ]
         for path, patch in pr.patches.items():
             for pattern, title in secret_patterns:
-                if re.search(pattern, patch):
+                if re.search(pattern, patch, re.MULTILINE):
                     findings.append(
                         Finding(
                             category=FindingCategory.SECURITY,
                             severity=Severity.HIGH,
                             title=title,
                             file=path,
-                            line=first_changed_line(patch),
+                            line=line_for_pattern(patch, pattern),
                             rationale=f"Pattern `{pattern}` matched in PR diff.",
                             suggestion="Remove secrets from code and use environment variables or a secret manager.",
                             confidence=0.85,
@@ -70,14 +74,14 @@ class SecurityAgent:
             if rule.category != "security":
                 continue
             for path, patch in pr.patches.items():
-                if re.search(rule.pattern, patch):
+                if re.search(rule.pattern, patch, re.MULTILINE):
                     findings.append(
                         Finding(
                             category=FindingCategory.SECURITY,
                             severity=rule.severity,
                             title=rule.description,
                             file=path,
-                            line=first_changed_line(patch),
+                            line=line_for_pattern(patch, rule.pattern),
                             rationale=f"Matched custom rule `{rule.id}`.",
                             suggestion="Refactor to satisfy team rule.",
                             confidence=0.8,

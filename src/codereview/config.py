@@ -22,6 +22,11 @@ class ContextConfig(BaseModel):
     max_snippets: int = 12
     max_snippet_chars: int = 2000
     neighbor_depth: int = 1
+    min_vector_snippets_before_fallback: int = 2
+
+
+class EnsembleConfig(BaseModel):
+    llm_verify: bool = True
 
 
 class JiraConfig(BaseModel):
@@ -29,6 +34,8 @@ class JiraConfig(BaseModel):
     base_url: str = ""
     projects: list[str] = Field(default_factory=list)
     max_issues: int = 3
+    max_index_issues: int = 100
+    index_jql: str | None = None
     acceptance_fields: list[str] = Field(default_factory=lambda: ["customfield_10016", "customfield_10026"])
 
 
@@ -36,6 +43,7 @@ class ConfluenceConfig(BaseModel):
     enabled: bool = False
     spaces: list[str] = Field(default_factory=list)
     max_pages: int = 2
+    max_index_pages: int = 50
     follow_jira_remote_links: bool = True
 
 
@@ -52,15 +60,37 @@ class SupabaseConfig(BaseModel):
     table: str = "code_embeddings"
     max_chunk_chars: int = 1500
     chunk_overlap: int = 200
-    index_on_review: bool = True
+    index_on_review: bool = False
     match_threshold: float = 0.55
-    vector_top_k: int = 8
+    vector_top_k: int = 12
+
+
+class IndexingConfig(BaseModel):
+    sources: list[str] = Field(default_factory=lambda: ["code", "jira", "confluence"])
+    code_globs: list[str] = Field(
+        default_factory=lambda: [
+            "**/*.py",
+            "**/*.ts",
+            "**/*.tsx",
+            "**/*.js",
+            "**/*.jsx",
+            "**/*.go",
+            "**/*.java",
+            "**/*.rb",
+            "**/*.rs",
+            "**/*.md",
+            "**/*.yaml",
+            "**/*.yml",
+        ]
+    )
 
 
 class VectorConfig(BaseModel):
     enabled: bool = False
+    unified_rag: bool = True
     embedding_model: str = "openai/text-embedding-3-small"
     supabase: SupabaseConfig = Field(default_factory=SupabaseConfig)
+    indexing: IndexingConfig = Field(default_factory=IndexingConfig)
 
 
 class PostingConfig(BaseModel):
@@ -77,6 +107,7 @@ class ReviewerConfig(BaseModel):
     context: ContextConfig = Field(default_factory=ContextConfig)
     external_context: ExternalContextConfig = Field(default_factory=ExternalContextConfig)
     vector: VectorConfig = Field(default_factory=VectorConfig)
+    ensemble: EnsembleConfig = Field(default_factory=EnsembleConfig)
     posting: PostingConfig = Field(default_factory=PostingConfig)
 
     @classmethod

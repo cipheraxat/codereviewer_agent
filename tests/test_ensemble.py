@@ -65,9 +65,10 @@ def test_ensemble_dedupes_and_filters() -> None:
     ),
   ]
 
-  filtered, summary, confidence, verdict = agent.aggregate(findings, config, pr)
+  filtered, summary, confidence, verdict, llm_degraded = agent.aggregate(findings, config, pr)
   assert len(filtered) == 1
   assert filtered[0].confidence == 0.9
   assert confidence > 0
   assert verdict == "request_changes"
   assert "1 issue" in summary
+  assert llm_degraded is False

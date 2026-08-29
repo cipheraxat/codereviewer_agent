@@ -20,6 +20,6 @@ jobs:
         uses: ./action
         with:
           llm_api_key: ${{ secrets.LLM_API_KEY }}
-          llm_provider: openai
+          llm_provider: openrouter
           config_path: reviewer.yaml
           dry_run: ${{ vars.CODEREVIEW_DRY_RUN || 'false' }}

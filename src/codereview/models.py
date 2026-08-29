@@ -42,6 +42,9 @@ class Finding(BaseModel):
     agent: str = "unknown"
     rule_id: Optional[str] = None
 
+    def location_key(self) -> tuple[str, Optional[str], Optional[int]]:
+        return (self.category.value, self.file, self.line)
+
     def dedupe_key(self) -> tuple[str, Optional[str], Optional[int]]:
         return (self.title.lower().strip(), self.file, self.line)
 
@@ -51,6 +54,14 @@ class CodeSnippet(BaseModel):
     content: str
     score: float = 0.0
     reason: str = ""
+
+
+class KnowledgeDocument(BaseModel):
+    """A document to embed into the unified knowledge index."""
+
+    path: str
+    content: str
+    source: str = "code"  # code | jira | confluence
 
 
 class PullRequestContext(BaseModel):
@@ -73,6 +84,7 @@ class ReviewMetrics(BaseModel):
     estimated_cost_usd: float = 0.0
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
+    llm_degraded: bool = False
 
 
 class ReviewReport(BaseModel):

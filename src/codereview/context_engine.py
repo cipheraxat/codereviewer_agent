@@ -5,8 +5,9 @@ import logging
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, Protocol
 
+from codereview.chunking import chunk_text
 from codereview.config import ReviewerConfig, Settings
 from codereview.embeddings import EmbeddingClient
 from codereview.external_context import ExternalContextFetcher, repo_slug
@@ -48,39 +49,33 @@ def _is_code_file(path: Path) -> bool:
     return path.suffix.lower() in CODE_EXTENSIONS
 
 
-def _chunk_text(text: str, max_chars: int, overlap: int) -> list[str]:
-    if len(text) <= max_chars:
-        return [text]
-    chunks: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(len(text), start + max_chars)
-        chunks.append(text[start:end])
-        if end >= len(text):
-            break
-        start = max(0, end - overlap)
-    return chunks
+class ExternalContextSource(Protocol):
+    def fetch(self, pr: PullRequestContext) -> list[CodeSnippet]: ...
 
 
 class ContextEngine:
-    """Hybrid retrieval: BM25-lite + optional Supabase vectors + external JIRA/Confluence."""
+    """Hybrid retrieval with unified RAG: query pre-indexed code + JIRA + Confluence vectors."""
 
     def __init__(
         self,
         repo_root: Path,
         config: ReviewerConfig,
         settings: Optional[Settings] = None,
+        *,
+        embeddings: Any | None = None,
+        vector_store: Any | None = None,
+        external_fetcher: ExternalContextSource | None = None,
     ) -> None:
         self.repo_root = repo_root.resolve()
         self.config = config
         self.settings = settings or Settings()
-        self.embeddings = EmbeddingClient(self.settings)
-        self.vector_store = SupabaseVectorStore(
+        self.embeddings = embeddings or EmbeddingClient(self.settings)
+        self.vector_store = vector_store or SupabaseVectorStore(
             config.vector.supabase,
             url=self.settings.supabase_url,
             key=self.settings.supabase_key,
         )
-        self.external_fetcher = ExternalContextFetcher(
+        self.external_fetcher = external_fetcher or ExternalContextFetcher(
             config.external_context,
             atlassian_email=self.settings.atlassian_email,
             atlassian_api_token=self.settings.atlassian_api_token,
@@ -102,8 +97,45 @@ class ContextEngine:
                     score=10.0,
                     reason="changed_in_pr",
                 )
-                self._maybe_index_file(pr, rel_path, content)
 
+        unified_rag = self._unified_rag_enabled()
+
+        if unified_rag:
+            vector_hits = self._vector_search(pr, query_terms)
+            for snippet in vector_hits:
+                existing = candidates.get(snippet.path)
+                if existing is None or existing.score < snippet.score:
+                    candidates[snippet.path] = snippet
+
+            vector_only = [snippet for snippet in candidates.values() if snippet.reason.startswith("vector_match")]
+            if len(vector_only) < self.config.context.min_vector_snippets_before_fallback:
+                logger.info(
+                    "Vector search returned %s snippets; supplementing with BM25 neighbors",
+                    len(vector_only),
+                )
+                self._add_bm25_neighbors(pr, changed, query_terms, candidates)
+        else:
+            self._add_bm25_neighbors(pr, changed, query_terms, candidates)
+
+            if self._vector_enabled():
+                for snippet in self._vector_search(pr, query_terms):
+                    existing = candidates.get(snippet.path)
+                    if existing is None or existing.score < snippet.score:
+                        candidates[snippet.path] = snippet
+
+            for snippet in self.external_fetcher.fetch(pr):
+                candidates[snippet.path] = snippet
+
+        ranked = sorted(candidates.values(), key=lambda s: s.score, reverse=True)
+        return ranked[: self.config.context.max_snippets]
+
+    def _add_bm25_neighbors(
+        self,
+        pr: PullRequestContext,
+        changed: list[str],
+        query_terms: Counter[str],
+        candidates: dict[str, CodeSnippet],
+    ) -> None:
         for rel_path in changed:
             for neighbor in self._neighbor_paths(rel_path):
                 if neighbor in candidates:
@@ -125,16 +157,8 @@ class ContextEngine:
                 )
                 self._maybe_index_file(pr, neighbor, content)
 
-        if self._vector_enabled():
-            for snippet in self._vector_search(pr, query_terms):
-                if snippet.path not in candidates or candidates[snippet.path].score < snippet.score:
-                    candidates[snippet.path] = snippet
-
-        for snippet in self.external_fetcher.fetch(pr):
-            candidates[snippet.path] = snippet
-
-        ranked = sorted(candidates.values(), key=lambda s: s.score, reverse=True)
-        return ranked[: self.config.context.max_snippets]
+    def _unified_rag_enabled(self) -> bool:
+        return self._vector_enabled() and self.config.vector.unified_rag
 
     def _vector_enabled(self) -> bool:
         return (
@@ -148,20 +172,26 @@ class ContextEngine:
         if not self._vector_enabled() or not self.config.vector.supabase.index_on_review:
             return
         try:
-            chunks = _chunk_text(
+            chunks = chunk_text(
                 content,
                 self.config.vector.supabase.max_chunk_chars,
                 self.config.vector.supabase.chunk_overlap,
             )
             embeddings = self.embeddings.embed_texts(chunks)
-            self.vector_store.upsert_embeddings(repo_slug(pr), rel_path, chunks, embeddings)
+            self.vector_store.upsert_embeddings(
+                repo_slug(pr),
+                rel_path,
+                chunks,
+                embeddings,
+                source="code",
+            )
         except Exception as exc:
             logger.warning("Vector indexing skipped for %s: %s", rel_path, exc)
 
     def _vector_search(self, pr: PullRequestContext, query_terms: Counter[str]) -> list[CodeSnippet]:
-        query = " ".join(term for term, _ in query_terms.most_common(40))
+        query = self._build_query_text(pr, query_terms)
         if not query.strip():
-            query = pr.title
+            return []
         try:
             query_embedding = self.embeddings.embed_query(query)
             return self.vector_store.similarity_search(
@@ -172,6 +202,16 @@ class ContextEngine:
         except Exception as exc:
             logger.warning("Vector search skipped: %s", exc)
             return []
+
+    def _build_query_text(self, pr: PullRequestContext, query_terms: Counter[str]) -> str:
+        parts = [pr.title]
+        if pr.body:
+            parts.append(pr.body)
+        parts.append(" ".join(term for term, _ in query_terms.most_common(40)))
+        for path, patch in pr.patches.items():
+            parts.append(path)
+            parts.append(patch[:1500])
+        return "\n".join(parts)
 
     def _build_query_terms(self, pr: PullRequestContext, changed_files: list[str]) -> Counter[str]:
         terms: list[str] = []

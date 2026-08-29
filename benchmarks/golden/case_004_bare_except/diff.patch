@@ -1,0 +1,12 @@
+diff --git a/src/worker/job.py b/src/worker/job.py
+index 1111111..2222222 100644
+--- a/src/worker/job.py
++++ b/src/worker/job.py
+@@ -4,5 +4,8 @@ def run_job(payload):
+     try:
+         process(payload)
+-    except Exception:
++    except:
++        logger.error("job failed")
+         return False
++    return True

@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 
 from codereview.config import ConfluenceConfig, ExternalContextConfig, JiraConfig
-from codereview.models import CodeSnippet, PullRequestContext
+from codereview.models import CodeSnippet, KnowledgeDocument, PullRequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,144 @@ class ExternalContextFetcher:
         except Exception as exc:
             logger.warning("External context fetch failed (continuing without it): %s", exc)
         return snippets[: self.config.max_snippets]
+
+    def fetch_for_indexing(self) -> list[KnowledgeDocument]:
+        """Bulk-fetch JIRA/Confluence documents for the unified knowledge index."""
+        if not self.config.enabled:
+            return []
+
+        documents: list[KnowledgeDocument] = []
+        try:
+            if self.config.jira.enabled:
+                documents.extend(self._fetch_jira_for_indexing())
+            if self.config.confluence.enabled:
+                documents.extend(self._fetch_confluence_for_indexing())
+        except Exception as exc:
+            logger.warning("External indexing fetch failed (continuing without it): %s", exc)
+        return documents
+
+    def _jira_index_jql(self) -> str | None:
+        if self.config.jira.index_jql:
+            return self.config.jira.index_jql
+        if self.config.jira.projects:
+            projects = ", ".join(self.config.jira.projects)
+            return f"project in ({projects}) ORDER BY updated DESC"
+        return None
+
+    def _fetch_jira_for_indexing(self) -> list[KnowledgeDocument]:
+        if not self.available:
+            logger.info("JIRA indexing enabled but Atlassian credentials missing; skipping")
+            return []
+
+        jql = self._jira_index_jql()
+        if not jql:
+            logger.info("JIRA indexing skipped: set external_context.jira.projects or index_jql")
+            return []
+
+        url = f"https://{self.domain}/rest/api/3/search"
+        params = {
+            "jql": jql,
+            "maxResults": self.config.jira.max_index_issues,
+            "fields": "summary,description," + ",".join(self.config.jira.acceptance_fields),
+        }
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(url, params=params, auth=self._auth())
+                if response.status_code != 200:
+                    logger.warning("JIRA search for indexing returned %s", response.status_code)
+                    return []
+                issues = response.json().get("issues", [])
+        except httpx.HTTPError as exc:
+            logger.warning("JIRA indexing search failed: %s", exc)
+            return []
+
+        documents: list[KnowledgeDocument] = []
+        for issue in issues:
+            key = issue.get("key", "")
+            fields = issue.get("fields", {})
+            summary = fields.get("summary", "")
+            description = self._jira_description_to_text(fields.get("description"))
+            acceptance = ""
+            for field_key in self.config.jira.acceptance_fields:
+                value = fields.get(field_key)
+                if value:
+                    acceptance = self._jira_description_to_text(value) if isinstance(value, dict) else str(value)
+                    break
+
+            body = f"Summary: {summary}\n\nDescription:\n{description}"
+            if acceptance:
+                body += f"\n\nAcceptance criteria:\n{acceptance}"
+
+            max_chars = self.config.max_chars_per_source
+            if len(body) > max_chars:
+                body = body[:max_chars] + "\n... [truncated]"
+
+            documents.append(
+                KnowledgeDocument(
+                    path=f"jira:{key}",
+                    content=body,
+                    source="jira",
+                )
+            )
+        return documents
+
+    def _fetch_confluence_for_indexing(self) -> list[KnowledgeDocument]:
+        if not self.available:
+            logger.info("Confluence indexing enabled but Atlassian credentials missing; skipping")
+            return []
+
+        spaces = self.config.confluence.spaces
+        if not spaces:
+            logger.info("Confluence indexing skipped: set external_context.confluence.spaces")
+            return []
+
+        documents: list[KnowledgeDocument] = []
+        remaining = self.config.confluence.max_index_pages
+        for space_key in spaces:
+            if remaining <= 0:
+                break
+            pages = self._list_confluence_pages(space_key, limit=remaining)
+            documents.extend(pages)
+            remaining -= len(pages)
+        return documents
+
+    def _list_confluence_pages(self, space_key: str, *, limit: int) -> list[KnowledgeDocument]:
+        url = f"https://{self.domain}/wiki/rest/api/content"
+        params = {
+            "spaceKey": space_key,
+            "type": "page",
+            "limit": limit,
+            "expand": "body.storage,title",
+        }
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(url, params=params, auth=self._auth())
+                if response.status_code != 200:
+                    logger.warning("Confluence space %s listing returned %s", space_key, response.status_code)
+                    return []
+                results = response.json().get("results", [])
+        except httpx.HTTPError as exc:
+            logger.warning("Confluence indexing failed for space %s: %s", space_key, exc)
+            return []
+
+        documents: list[KnowledgeDocument] = []
+        for page in results:
+            page_id = page.get("id", "")
+            title = page.get("title", page_id)
+            html = ((page.get("body") or {}).get("storage") or {}).get("value", "")
+            text = _html_to_text(html)
+            body = f"Title: {title}\n\n{text}"
+            max_chars = self.config.max_chars_per_source
+            if len(body) > max_chars:
+                body = body[:max_chars] + "\n... [truncated]"
+            documents.append(
+                KnowledgeDocument(
+                    path=f"confluence:{page_id}",
+                    content=body,
+                    source="confluence",
+                )
+            )
+        return documents
 
     def _auth(self) -> tuple[str, str]:
         if not self.available:

@@ -1,0 +1,6 @@
+{
+  "key": "CP-123",
+  "summary": "Harden authentication login endpoint",
+  "description": "The login flow must use parameterized database queries. Never concatenate user input into SQL strings. Remove debug logging from authentication paths before merge.",
+  "acceptance_criteria": "1. No hardcoded API keys or secrets in source code.\n2. All SQL must use bound parameters or an ORM.\n3. Authentication code must not log usernames or passwords.\n4. Unit tests cover invalid credential paths."
+}
