@@ -6,12 +6,12 @@ branding:
 
 inputs:
   llm_api_key:
-    description: "API key for OpenAI or Anthropic"
+    description: "API key for OpenRouter, OpenAI, or Anthropic"
     required: true
   llm_provider:
-    description: "LLM provider: openai or anthropic"
+    description: "LLM provider: openrouter, openai, or anthropic"
     required: false
-    default: "openai"
+    default: "openrouter"
   llm_model:
     description: "Optional model override"
     required: false

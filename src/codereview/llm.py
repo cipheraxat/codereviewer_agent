@@ -26,6 +26,8 @@ class LLMClient:
 
         if self.provider == "anthropic":
             return self._anthropic_json(system, user)
+        if self.provider == "openrouter":
+            return self._openrouter_json(system, user)
         return self._openai_json(system, user)
 
     def _anthropic_json(self, system: str, user: str) -> dict[str, Any]:
@@ -47,6 +49,23 @@ class LLMClient:
         from openai import OpenAI
 
         client = OpenAI(api_key=self.settings.llm_api_key)
+        return self._chat_json(client, system, user)
+
+    def _openrouter_json(self, system: str, user: str) -> dict[str, Any]:
+        from openai import OpenAI
+
+        extra_headers: dict[str, str] = {"X-Title": self.settings.openrouter_app_name}
+        if self.settings.openrouter_site_url:
+            extra_headers["HTTP-Referer"] = self.settings.openrouter_site_url
+
+        client = OpenAI(
+            api_key=self.settings.llm_api_key,
+            base_url=self.settings.openrouter_base_url,
+            default_headers=extra_headers,
+        )
+        return self._chat_json(client, system, user)
+
+    def _chat_json(self, client: Any, system: str, user: str) -> dict[str, Any]:
         response = client.chat.completions.create(
             model=self.model,
             response_format={"type": "json_object"},
@@ -72,6 +91,9 @@ class LLMClient:
     def estimate_cost_usd(self) -> float:
         if self.provider == "anthropic":
             return (self.input_tokens * 3.0 + self.output_tokens * 15.0) / 1_000_000
+        if self.provider == "openrouter":
+            # Rough blended estimate; actual cost depends on routed model.
+            return (self.input_tokens * 0.15 + self.output_tokens * 0.6) / 1_000_000
         return (self.input_tokens * 0.15 + self.output_tokens * 0.6) / 1_000_000
 
 

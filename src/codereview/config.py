@@ -56,14 +56,23 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     llm_api_key: str | None = Field(default=None, alias="LLM_API_KEY")
-    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
+    llm_provider: str = Field(default="openrouter", alias="LLM_PROVIDER")
     llm_model: str | None = Field(default=None, alias="LLM_MODEL")
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        alias="OPENROUTER_BASE_URL",
+    )
+    openrouter_site_url: str | None = Field(default=None, alias="OPENROUTER_SITE_URL")
+    openrouter_app_name: str = Field(default="codereview-agent", alias="OPENROUTER_APP_NAME")
     github_token: str | None = Field(default=None, alias="GITHUB_TOKEN")
     dry_run: bool = Field(default=False, alias="DRY_RUN")
 
     def resolved_model(self) -> str:
         if self.llm_model:
             return self.llm_model
-        if self.llm_provider == "anthropic":
+        provider = self.llm_provider.lower()
+        if provider == "anthropic":
             return "claude-sonnet-4-20250514"
+        if provider == "openrouter":
+            return "openai/gpt-4o-mini"
         return "gpt-4o-mini"

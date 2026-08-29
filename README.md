@@ -40,10 +40,13 @@ cp reviewer.example.yaml reviewer.yaml
 Set environment variables:
 
 ```bash
-export LLM_API_KEY=sk-...
-export LLM_PROVIDER=openai   # or anthropic
-export GITHUB_TOKEN=ghp_...  # only needed for review-pr
+export LLM_API_KEY=sk-or-...          # OpenRouter API key
+export LLM_PROVIDER=openrouter        # openrouter | openai | anthropic
+export LLM_MODEL=openai/gpt-4o-mini   # optional; any OpenRouter model slug
+export GITHUB_TOKEN=ghp_...           # only needed for review-pr
 ```
+
+**OpenRouter (recommended):** use your OpenRouter key as `LLM_API_KEY` with `LLM_PROVIDER=openrouter`. Pick any model from [openrouter.ai/models](https://openrouter.ai/models), e.g. `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`.
 
 ### 3. Review a local diff (no API keys required for heuristics)
 
@@ -85,14 +88,15 @@ jobs:
       - uses: your-org/codereviewer_agent/action@main
         with:
           llm_api_key: ${{ secrets.LLM_API_KEY }}
-          llm_provider: openai
+          llm_provider: openrouter
+          llm_model: openai/gpt-4o-mini
           config_path: reviewer.yaml
 ```
 
 ### Company setup checklist
 
 1. Add `reviewer.yaml` with your team's ignore paths and custom rules
-2. Create repo secret `LLM_API_KEY`
+2. Create repo secret `LLM_API_KEY` (your OpenRouter API key)
 3. Enable the workflow on `pull_request`
 4. Start with `dry_run: true` for one sprint, then switch to live posting
 5. Tune `severity_threshold` and `posting.min_confidence` to reduce noise
