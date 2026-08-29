@@ -6,7 +6,9 @@ alter table public.code_embeddings
 create index if not exists code_embeddings_repo_source_idx
   on public.code_embeddings (repo, source);
 
-create or replace function public.match_code_embeddings(
+drop function if exists public.match_code_embeddings(vector, text, integer, double precision);
+
+create function public.match_code_embeddings(
   query_embedding vector(1536),
   match_repo text,
   match_count integer,
