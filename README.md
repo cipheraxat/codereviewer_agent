@@ -91,7 +91,33 @@ jobs:
           llm_provider: openrouter
           llm_model: openai/gpt-4o-mini
           config_path: reviewer.yaml
+          github_token: ${{ steps.app-token.outputs.token }}
 ```
+
+### Post as `codereview-agent[bot]` (not `github-actions[bot]`)
+
+The default `${{ github.token }}` always posts reviews as **github-actions[bot]**. To rename the reviewer identity, use a **GitHub App** named `codereview-agent`:
+
+1. Create the app from the manifest (one click):  
+   https://github.com/settings/apps/new?manifest=https://raw.githubusercontent.com/cipheraxat/codereviewer_agent/main/github-app-manifest.json
+2. Install it on your repo (e.g. CopilotPulse) with **Pull requests: Read & write**
+3. Add repo secrets:
+   - `CODEREVIEW_APP_ID` — App ID from the app settings page
+   - `CODEREVIEW_APP_PRIVATE_KEY` — full PEM contents of the generated private key
+4. Add these workflow steps **before** checkout:
+
+```yaml
+      - name: Generate codereview-agent token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CODEREVIEW_APP_ID }}
+          private-key: ${{ secrets.CODEREVIEW_APP_PRIVATE_KEY }}
+```
+
+5. Pass `github_token: ${{ steps.app-token.outputs.token }}` to the action (see example above)
+
+Reviews will then appear as **codereview-agent[bot]**.
 
 ### Company setup checklist
 

@@ -28,6 +28,10 @@ inputs:
     description: "If true, do not post GitHub review comments"
     required: false
     default: "false"
+  github_token:
+    description: "GitHub token for fetching/posting PR reviews. Pass a GitHub App installation token to post as codereview-agent[bot] instead of github-actions[bot]."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -49,7 +53,7 @@ runs:
         LLM_API_KEY: ${{ inputs.llm_api_key }}
         LLM_PROVIDER: ${{ inputs.llm_provider }}
         LLM_MODEL: ${{ inputs.llm_model }}
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ inputs.github_token != '' && inputs.github_token || github.token }}
       run: |
         ARGS=(review-pr "${{ github.repository }}#${{ github.event.pull_request.number }}" --repo-root "${{ inputs.repo_root }}" --output review-report.json)
         if [[ -f "${{ inputs.config_path }}" ]]; then

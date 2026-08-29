@@ -1,0 +1,16 @@
+{
+  "name": "codereview-agent",
+  "url": "https://github.com/cipheraxat/codereviewer_agent",
+  "description": "Multi-agent PR reviewer that posts structured security and quality reviews.",
+  "hook_attributes": {
+    "active": false
+  },
+  "redirect_url": "https://github.com/cipheraxat/codereviewer_agent",
+  "public": true,
+  "default_permissions": {
+    "contents": "read",
+    "pull_requests": "write",
+    "metadata": "read"
+  },
+  "default_events": []
+}
