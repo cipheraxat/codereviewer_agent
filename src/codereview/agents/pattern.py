@@ -59,9 +59,12 @@ class PatternAgent:
             return heuristic
 
         user = build_review_prompt(pr, context_block, config)
-        payload = llm.complete_json(PATTERN_SYSTEM, user)
-        llm_findings = findings_from_payload(payload, self.name)
-        return merge_findings(heuristic, llm_findings)
+        try:
+            payload = llm.complete_json(PATTERN_SYSTEM, user)
+            llm_findings = findings_from_payload(payload, self.name)
+            return merge_findings(heuristic, llm_findings)
+        except Exception:
+            return heuristic
 
     def _heuristic_scan(self, pr: PullRequestContext, config: ReviewerConfig) -> list[Finding]:
         findings: list[Finding] = []
