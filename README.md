@@ -2,7 +2,7 @@
 
 Production-style PR review pipeline for GitHub: batch-index knowledge into Supabase, retrieve relevant context at review time, run parallel security and pattern agents, ensemble the findings, and post structured review comments.
 
-**v0.4.0** — unified RAG (code + JIRA + Confluence), semantic dedupe, optional LLM ensemble verifier, offline demo, and live E2E tooling.
+**v0.4.0** — unified RAG (code + JIRA + Confluence), semantic dedupe, optional LLM ensemble verifier, and offline demo.
 
 <p align="center">
   <img src="docs/images/architecture.svg" alt="Multi-agent PR review architecture diagram" width="900"/>
@@ -322,7 +322,6 @@ PullRequestContext
 - Structured findings: category, severity, file, line, rationale, suggestion, confidence
 - Hybrid context retrieval: changed files + vector search + BM25 fallback
 - **Offline demo** — `codereview demo` with mock JIRA/Confluence and in-memory vectors (no APIs)
-- **Live E2E** — `scripts/run_e2e_live.sh` exercises real Supabase + GitHub end-to-end
 - Semantic finding dedupe (merges similar titles without collapsing distinct adjacent issues)
 - Accurate line numbers from diff hunks
 - Optional **JIRA / Confluence** indexing (fail-open, disabled by default)
@@ -398,15 +397,6 @@ codereview review-pr owner/repo#123 --repo-root . --output review-report.json
 ```
 
 Use `--dry-run` to generate the report without posting comments.
-
-### 7. Live E2E (real Supabase + GitHub)
-
-```bash
-# Requires .env with LLM + Supabase credentials; uses gh auth token for GitHub
-./scripts/run_e2e_live.sh
-```
-
-Opens a test PR from `e2e_sandbox/`, indexes knowledge, runs review, and writes `e2e-live-report.json`. See [`e2e_sandbox/README.md`](e2e_sandbox/README.md).
 
 ## Unified RAG setup
 
@@ -631,9 +621,6 @@ src/codereview/
 supabase/migrations/
   001_code_embeddings.sql
   002_unified_knowledge_source.sql
-scripts/
-  e2e_live_flow.py       # live E2E against real Supabase + GitHub
-  run_e2e_live.sh
 tests/fixtures/knowledge/  # mock JIRA/Confluence JSON for offline demo
 benchmarks/golden/         # 4 labeled PR diffs for eval + CI gate
 .github/workflows/
@@ -651,7 +638,7 @@ docs/images/
 
 ## Resume bullet
 
-Built a multi-agent GitHub PR reviewer (LangGraph) with unified RAG (batch-index code + JIRA + Confluence into Supabase pgvector), semantic dedupe, optional LLM ensemble verification, offline demo, live E2E harness, and precision/recall eval with CI gate — posting structured inline comments via GitHub Actions.
+Built a multi-agent GitHub PR reviewer (LangGraph) with unified RAG (batch-index code + JIRA + Confluence into Supabase pgvector), semantic dedupe, optional LLM ensemble verification, offline demo, and precision/recall eval with CI gate — posting structured inline comments via GitHub Actions.
 
 ## Roadmap (v2)
 
