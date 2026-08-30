@@ -15,7 +15,7 @@
   <text x="515" y="250" text-anchor="middle" fill="#991b1b" font-size="13" font-weight="700">pattern_review</text>
 
   <rect x="270" y="290" width="180" height="50" rx="8" fill="#ede9fe" stroke="#8b5cf6"/>
-  <text x="360" y="320" text-anchor="middle" fill="#5b21b6" font-size="13" font-weight="700">ensemble ’ ReviewReport</text>
+  <text x="360" y="320" text-anchor="middle" fill="#5b21b6" font-size="13" font-weight="700">ensemble - ReviewReport</text>
 
   <line x1="360" y1="104" x2="360" y2="128" stroke="#6b7280" stroke-width="2"/>
   <line x1="360" y1="180" x2="205" y2="218" stroke="#6b7280" stroke-width="2"/>

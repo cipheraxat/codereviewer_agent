@@ -4,15 +4,38 @@ Production-style PR review pipeline for GitHub: batch-index knowledge into Supab
 
 **v0.4.0** — unified RAG (code + JIRA + Confluence), semantic dedupe, optional LLM ensemble verifier, and offline demo.
 
-<p align="center">
-  <img src="docs/images/architecture.svg" alt="Multi-agent PR review architecture diagram" width="900"/>
-</p>
+```mermaid
+flowchart LR
+  GH["GitHub PR<br/>diff + metadata"]
+  CE["Context Engine<br/>unified RAG retrieval"]
+  RC["Relevant Context<br/>ranked snippets + reviewer.yaml"]
+  SA["Security Agent<br/>secrets, injection, authz"]
+  PA["Pattern Agent<br/>conventions, tests, smells"]
+  EV["Ensemble Verifier<br/>dedupe · rank · verdict"]
+  OUT["GitHub Review<br/>summary + inline comments"]
+
+  GH --> CE --> RC
+  RC --> SA
+  RC --> PA
+  SA --> EV
+  PA --> EV
+  EV --> OUT
+```
 
 ## How it works (summary)
 
-<p align="center">
-  <img src="docs/images/data-flow.svg" alt="End-to-end PR review data flow" width="900"/>
-</p>
+```mermaid
+flowchart LR
+  T["1. Trigger<br/>PR event or CLI"]
+  IX["2. Index<br/>batch / cron"]
+  IN["3. Ingest<br/>diff + patches"]
+  R["4. Retrieve<br/>vector search + BM25"]
+  A["5. Analyze<br/>parallel agents"]
+  E["6. Ensemble<br/>dedupe + verdict"]
+  P["7. Publish<br/>comments + JSON"]
+
+  T --> IX --> IN --> R --> A --> E --> P
+```
 
 1. **Trigger** — PR opened/updated or `codereview review-pr` from CLI
 2. **Index** (batch/cron) — `codereview index-knowledge` embeds repo code + JIRA + Confluence into Supabase
@@ -22,9 +45,15 @@ Production-style PR review pipeline for GitHub: batch-index knowledge into Supab
 6. **Ensemble** — dedupe, filter by confidence/severity, assign verdict
 7. **Publish** — structured PR review + inline comments + `review-report.json`
 
-<p align="center">
-  <img src="docs/images/langgraph-pipeline.svg" alt="LangGraph fan-out fan-in orchestration" width="720"/>
-</p>
+```mermaid
+flowchart TD
+  START([START]) --> BC[build_context]
+  BC --> SR[security_review]
+  BC --> PR[pattern_review]
+  SR --> ENS[ensemble → ReviewReport]
+  PR --> ENS
+  ENS --> ENDNODE([END])
+```
 
 ---
 
@@ -312,9 +341,22 @@ PullRequestContext
 
 ## Example output on GitHub
 
-<p align="center">
-  <img src="docs/images/github-review-example.svg" alt="Example GitHub PR review with inline comments" width="900"/>
-</p>
+```text
+github-actions[bot] requested changes · reviewed just now
+
+Automated multi-agent review found 8 issue(s): 2 critical, 2 high, 4 medium
+Overall confidence: 0.87 · Latency: 6076 ms
+
+1. [CRITICAL / security] Hardcoded API Key — src/app/auth.ts:42
+2. [HIGH / security] SQL Injection Risk — src/db/query.py:18
+
+Inline on diff:
+  + const api_key = "sk-live-secret";
+  > [critical] Hardcoded API Key
+  > Use environment variables or a secret manager.
+```
+
+See [`docs/images/github-review-example.svg`](docs/images/github-review-example.svg) for a visual mock.
 
 ## Features
 
