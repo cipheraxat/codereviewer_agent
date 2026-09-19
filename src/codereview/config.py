@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from codereview.models import Severity
+
+logger = logging.getLogger(__name__)
 
 
 class CustomRule(BaseModel):
@@ -27,6 +30,22 @@ class ContextConfig(BaseModel):
 
 class EnsembleConfig(BaseModel):
     llm_verify: bool = True
+    # OCR-style fact-check: drop only findings the diff proves wrong.
+    fact_check: bool = True
+
+
+class ReviewHarnessConfig(BaseModel):
+    """OCR-inspired deterministic harness around the LLM agents."""
+
+    effort: Literal["low", "medium", "high"] = "medium"
+    use_tools: bool = True
+    max_files_per_bundle: int = 8
+    max_bundles: int = 4
+    max_diff_chars_per_file: int = 40_000
+    # Empty → use `languages` list to enable built-in packs.
+    rule_packs: list[str] = Field(default_factory=list)
+    # When True, post only findings at/above severity_threshold with min_confidence.
+    precision_mode: bool = True
 
 
 class JiraConfig(BaseModel):
@@ -94,7 +113,8 @@ class VectorConfig(BaseModel):
 
 
 class PostingConfig(BaseModel):
-    min_confidence: float = 0.55
+    # Precision-first default (OCR stance): fewer, higher-confidence comments.
+    min_confidence: float = 0.70
     max_inline_comments: int = 25
 
 
@@ -109,6 +129,7 @@ class ReviewerConfig(BaseModel):
     vector: VectorConfig = Field(default_factory=VectorConfig)
     ensemble: EnsembleConfig = Field(default_factory=EnsembleConfig)
     posting: PostingConfig = Field(default_factory=PostingConfig)
+    review: ReviewHarnessConfig = Field(default_factory=ReviewHarnessConfig)
 
     @classmethod
     def load(cls, path: Path | None = None) -> ReviewerConfig:
@@ -117,6 +138,12 @@ class ReviewerConfig(BaseModel):
         if not path.exists():
             example = Path("reviewer.example.yaml")
             if example.exists():
+                logger.warning(
+                    "No %s found; falling back to %s. Copy it to reviewer.yaml and customize "
+                    "so example rules are not applied to your repo unintentionally.",
+                    path,
+                    example,
+                )
                 path = example
             else:
                 return cls()
@@ -131,6 +158,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="openrouter", alias="LLM_PROVIDER")
     llm_model: str | None = Field(default=None, alias="LLM_MODEL")
     embedding_model_override: str | None = Field(default=None, alias="EMBEDDING_MODEL")
+    embedding_api_key: str | None = Field(default=None, alias="EMBEDDING_API_KEY")
     openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1",
         alias="OPENROUTER_BASE_URL",

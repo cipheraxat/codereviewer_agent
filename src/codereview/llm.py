@@ -11,6 +11,18 @@ from codereview.models import Finding, FindingCategory, Severity
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MAX_TOKENS = 4096
+
+# Rough $/1M token rates for estimate_cost_usd (labeled as estimate in reports).
+_MODEL_RATES: dict[str, tuple[float, float]] = {
+    "claude-sonnet-4-20250514": (3.0, 15.0),
+    "claude-3-5-sonnet-latest": (3.0, 15.0),
+    "gpt-4o": (2.5, 10.0),
+    "gpt-4o-mini": (0.15, 0.6),
+    "openai/gpt-4o-mini": (0.15, 0.6),
+    "openai/gpt-4o": (2.5, 10.0),
+}
+
 
 class LLMClient:
     def __init__(self, settings: Settings) -> None:
@@ -49,7 +61,8 @@ class LLMClient:
         client = anthropic.Anthropic(api_key=self.settings.llm_api_key)
         response = client.messages.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=DEFAULT_MAX_TOKENS,
+            temperature=0,
             system=system,
             messages=[{"role": "user", "content": user}],
         )
@@ -82,6 +95,8 @@ class LLMClient:
         response = client.chat.completions.create(
             model=self.model,
             response_format={"type": "json_object"},
+            max_tokens=DEFAULT_MAX_TOKENS,
+            temperature=0,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -102,12 +117,15 @@ class LLMClient:
         return json.loads(text)
 
     def estimate_cost_usd(self) -> float:
-        if self.provider == "anthropic":
-            return (self.input_tokens * 3.0 + self.output_tokens * 15.0) / 1_000_000
-        if self.provider == "openrouter":
-            # Rough blended estimate; actual cost depends on routed model.
-            return (self.input_tokens * 0.15 + self.output_tokens * 0.6) / 1_000_000
-        return (self.input_tokens * 0.15 + self.output_tokens * 0.6) / 1_000_000
+        """Rough cost estimate — label as estimate in posted reviews."""
+        rates = _MODEL_RATES.get(self.model)
+        if rates is None:
+            if self.provider == "anthropic":
+                rates = (3.0, 15.0)
+            else:
+                rates = (0.15, 0.6)
+        input_rate, output_rate = rates
+        return (self.input_tokens * input_rate + self.output_tokens * output_rate) / 1_000_000
 
 
 def findings_from_payload(payload: dict[str, Any], agent: str) -> list[Finding]:
@@ -115,6 +133,7 @@ def findings_from_payload(payload: dict[str, Any], agent: str) -> list[Finding]:
     skipped = 0
     for item in payload.get("findings", []):
         try:
+            evidence = item.get("evidence_snippet") or item.get("existing_code")
             findings.append(
                 Finding(
                     category=FindingCategory(item.get("category", "quality")),
@@ -127,6 +146,7 @@ def findings_from_payload(payload: dict[str, Any], agent: str) -> list[Finding]:
                     confidence=float(item.get("confidence", 0.6)),
                     agent=agent,
                     rule_id=item.get("rule_id"),
+                    evidence_snippet=evidence,
                 )
             )
         except (KeyError, ValueError) as exc:

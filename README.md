@@ -2,19 +2,20 @@
 
 Production-style PR review pipeline for GitHub: batch-index knowledge into Supabase, retrieve relevant context at review time, run parallel security and pattern agents, ensemble the findings, and post structured review comments.
 
-**v0.4.0** — unified RAG (code + JIRA + Confluence), semantic dedupe, optional LLM ensemble verifier, and offline demo.
+**v0.5.0** — OCR-inspired harness: file select/bundle, evidence line anchoring, language rule packs, repo tools, fact-check filter, precision defaults. Builds on unified RAG (code + JIRA + Confluence).
 
 ```mermaid
 flowchart LR
   GH["GitHub PR<br/>diff + metadata"]
-  CE["Context Engine<br/>unified RAG retrieval"]
-  RC["Relevant Context<br/>ranked snippets + reviewer.yaml"]
+  SEL["Select + Bundle<br/>ignore · size · group"]
+  CE["Context Engine<br/>unified RAG + tools"]
+  RC["Relevant Context<br/>ranked snippets + packs"]
   SA["Security Agent<br/>secrets, injection, authz"]
   PA["Pattern Agent<br/>conventions, tests, smells"]
-  EV["Ensemble Verifier<br/>dedupe · rank · verdict"]
+  EV["Ensemble<br/>dedupe · fact-check · verdict"]
   OUT["GitHub Review<br/>summary + inline comments"]
 
-  GH --> CE --> RC
+  GH --> SEL --> CE --> RC
   RC --> SA
   RC --> PA
   SA --> EV
@@ -47,7 +48,8 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  START([START]) --> BC[build_context]
+  START([START]) --> SEL[select_and_bundle]
+  SEL --> BC[build_context]
   BC --> SR[security_review]
   BC --> PR[pattern_review]
   SR --> ENS[ensemble → ReviewReport]
@@ -238,23 +240,25 @@ With the default unified RAG config, steps D is skipped entirely.
 ### Step 4 — LangGraph agent orchestration
 
 ```text
-START → build_context
+START → select_and_bundle → build_context
            ├→ security_review  ─┐
            └→ pattern_review   ─┴→ ensemble → ReviewReport → END
 ```
 
 Both specialist agents receive the same inputs:
 
-- PR diffs (`PullRequestContext.patches`)
-- `context_block` (merged snippets from step 3)
-- `reviewer.yaml` (team rules, severity thresholds, custom regex rules)
+- Selected PR diffs (`PullRequestContext.patches` after ignore/size gates)
+- `context_block` (snippets + optional `file_read` / `code_search` tool context)
+- `reviewer.yaml` (team rules, language packs, severity, precision settings)
 - Optional LLM client (OpenRouter / OpenAI / Anthropic)
 
 | Agent | Focus | Layers |
 |---|---|---|
-| **Security** | Secrets, injection, authz, unsafe defaults | Heuristics always; LLM if `LLM_API_KEY` set |
-| **Pattern** | Conventions, TODOs, tests, docs, smells | Heuristics always; LLM if `LLM_API_KEY` set |
-| **Ensemble** | Semantic dedupe, optional LLM verify, filter, verdict | Rules-based dedupe; optional `ensemble.llm_verify` |
+| **Security** | Secrets, injection, authz, unsafe defaults | Heuristics + language packs; LLM if `LLM_API_KEY` set |
+| **Pattern** | Conventions, TODOs, tests, docs, smells | Heuristics + language packs; LLM if `LLM_API_KEY` set |
+| **Ensemble** | Semantic dedupe, LLM verify, fact-check, filter, verdict | Rules-based dedupe; `ensemble.llm_verify` + `ensemble.fact_check` |
+
+**Line anchoring:** findings carry an `evidence_snippet`; the harness re-locates the line in the diff (OCR-style) when evidence is present. Findings without usable evidence fall back to the first changed line in the hunk.
 
 **LLM fail-open:** if any LLM call fails, heuristic findings are still returned. The report includes `llm_degraded: true` when ensemble verification falls back.
 
@@ -272,6 +276,7 @@ Each finding is a typed object (not free-form prose):
 | `suggestion` | What to do instead |
 | `confidence` | `0.85` |
 | `agent` | `security` |
+| `evidence_snippet` | Exact added lines used to anchor `line` |
 
 **Ensemble verdict:**
 
@@ -360,19 +365,21 @@ See [`docs/images/github-review-example.svg`](docs/images/github-review-example.
 
 ## Features
 
+- **OCR-inspired harness** — select/bundle files, evidence line anchoring, language rule packs, repo tools, fact-check
+- **Precision defaults** — `posting.min_confidence: 0.70`, `review.effort` (`low|medium|high`), `review.max_bundles`, `ensemble.fact_check`
 - **Unified RAG** — batch-index code + JIRA + Confluence into Supabase; query vectors at review time
-- Structured findings: category, severity, file, line, rationale, suggestion, confidence
+- Structured findings: category, severity, file, line, evidence, rationale, suggestion, confidence
 - Hybrid context retrieval: changed files + vector search + BM25 fallback
 - **Offline demo** — `codereview demo` with mock JIRA/Confluence and in-memory vectors (no APIs)
 - Semantic finding dedupe (merges similar titles without collapsing distinct adjacent issues)
-- Accurate line numbers from diff hunks
+- Accurate line numbers from diff hunks + evidence re-location
 - Optional **JIRA / Confluence** indexing (fail-open, disabled by default)
 - Benchmark eval suite with CI gate (4 golden cases; recall ≥ 0.9, precision ≥ 0.65)
 - Parallel specialist agents with LangGraph fan-out/fan-in
-- Ensemble verifier with optional LLM cross-check (`ensemble.llm_verify`)
+- Ensemble verifier with optional LLM cross-check and fact-check filter
 - Works offline with `review-diff` (no GitHub API)
 - GitHub Action for company repos
-- Team rules via `reviewer.yaml` (procedural memory)
+- Team rules via `reviewer.yaml` (procedural memory + language packs)
 - OpenRouter, OpenAI, or Anthropic for LLM-backed analysis
 
 ## Quick start
@@ -591,18 +598,24 @@ jobs:
           llm_model: openai/gpt-4o-mini
           config_path: reviewer.yaml
           dry_run: "false"
+          supabase_url: ${{ secrets.SUPABASE_URL }}
+          supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          atlassian_email: ${{ secrets.ATLASSIAN_EMAIL }}
+          atlassian_api_token: ${{ secrets.ATLASSIAN_API_TOKEN }}
+          atlassian_domain: ${{ secrets.ATLASSIAN_DOMAIN }}
 ```
 
-The action reads these **optional** repository secrets when present:
+Pass secrets as **action inputs** (composite actions cannot read `secrets.*` directly):
 
-| Secret | Purpose |
+| Input / Secret | Purpose |
 |---|---|
-| `LLM_API_KEY` | OpenRouter/OpenAI/Anthropic (review + embeddings) |
-| `SUPABASE_URL` | Supabase project URL for vector context |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role for embedding upsert/search |
-| `ATLASSIAN_EMAIL` | JIRA/Confluence API user (optional) |
-| `ATLASSIAN_API_TOKEN` | Atlassian API token (optional) |
-| `ATLASSIAN_DOMAIN` | e.g. `yourcompany.atlassian.net` (optional) |
+| `llm_api_key` / `LLM_API_KEY` | OpenRouter/OpenAI/Anthropic (review + embeddings) |
+| `supabase_url` / `SUPABASE_URL` | Supabase project URL for vector context |
+| `supabase_service_role_key` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role for embedding upsert/search |
+| `atlassian_email` / `ATLASSIAN_EMAIL` | JIRA/Confluence API user (optional) |
+| `atlassian_api_token` / `ATLASSIAN_API_TOKEN` | Atlassian API token (optional) |
+| `atlassian_domain` / `ATLASSIAN_DOMAIN` | e.g. `yourcompany.atlassian.net` (optional) |
+| `EMBEDDING_API_KEY` (env) | Dedicated OpenAI-compatible embeddings key when using Anthropic for chat |
 
 Reviews post as **github-actions[bot]** using the default `GITHUB_TOKEN`.
 
@@ -614,7 +627,7 @@ Reviews post as **github-actions[bot]** using the default `GITHUB_TOKEN`.
 4. Enable the PR review workflow on `pull_request`
 5. Enable `knowledge-index.yml` for scheduled re-indexing (optional)
 6. Start with `dry_run: true` for one sprint, then switch to live posting
-7. Tune `severity_threshold`, `posting.min_confidence`, and `ensemble.llm_verify`
+7. Tune `severity_threshold`, `posting.min_confidence`, `review.effort`, `review.max_bundles`, and `ensemble.fact_check`
 8. Run `codereview eval` periodically to track precision/recall
 
 ### Live example
@@ -642,11 +655,15 @@ codereview version
 ```text
 src/codereview/
   cli.py                 # review-pr, review-diff, index-knowledge, demo, eval
-  graph.py               # LangGraph orchestrator
+  graph.py               # LangGraph orchestrator (select → context → agents → ensemble)
+  file_selection.py      # ignore/size gates + directory bundles
+  path_utils.py          # robust ignore_glob matching
+  rule_packs.py          # language packs (python/ts/js/yaml)
+  review_tools.py        # file_read / code_search context enrichment
   context_engine.py      # unified RAG + BM25 fallback
   knowledge_indexer.py   # batch index code + JIRA + Confluence
   finding_dedupe.py      # semantic dedupe across agents
-  diff_utils.py          # accurate line numbers from diff hunks
+  diff_utils.py          # line numbers + evidence anchoring
   demo_pipeline.py       # offline demo (mock knowledge + in-memory vectors)
   mock_knowledge.py      # mock JIRA/Confluence fixtures loader
   in_memory_vector_store.py
@@ -659,7 +676,7 @@ src/codereview/
   agents/
     security.py
     pattern.py
-    ensemble.py          # dedupe + optional LLM verify
+    ensemble.py          # dedupe + LLM verify + fact-check
 supabase/migrations/
   001_code_embeddings.sql
   002_unified_knowledge_source.sql
@@ -680,7 +697,7 @@ docs/images/
 
 ## Resume bullet
 
-Built a multi-agent GitHub PR reviewer (LangGraph) with unified RAG (batch-index code + JIRA + Confluence into Supabase pgvector), semantic dedupe, optional LLM ensemble verification, offline demo, and precision/recall eval with CI gate — posting structured inline comments via GitHub Actions.
+Built a multi-agent GitHub PR reviewer (LangGraph) with unified RAG, OCR-inspired select/bundle + evidence anchoring + language packs + fact-check, semantic dedupe, offline demo, and precision/recall eval with CI gate — posting structured inline comments via GitHub Actions.
 
 ## Roadmap (v2)
 

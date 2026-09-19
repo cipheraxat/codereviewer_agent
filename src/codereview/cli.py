@@ -8,10 +8,10 @@ from rich.console import Console
 from rich.table import Table
 
 from codereview.config import ReviewerConfig, Settings
-from codereview.github_client import GitHubClient, parse_pr_ref, synthetic_pr_from_diff
-from codereview.eval import run_benchmark
-from codereview.graph import ReviewOrchestrator
 from codereview.demo_pipeline import run_demo_pipeline
+from codereview.eval import run_benchmark
+from codereview.github_client import GitHubClient, parse_pr_ref, synthetic_pr_from_diff
+from codereview.graph import ReviewOrchestrator
 from codereview.knowledge_indexer import KnowledgeIndexer
 from codereview.models import ReviewReport
 
@@ -60,13 +60,14 @@ def review_pr(
     repo_root: Path = typer.Option(Path("."), "--repo-root", help="Local checkout of the repository"),
     config_path: Path | None = typer.Option(None, "--config", help="Path to reviewer.yaml"),
     output: Path = typer.Option(Path("review-report.json"), "--output", help="Where to write JSON report"),
-    post: bool = typer.Option(True, "--post/--no-post", help="Post review comments to GitHub"),
+    post: bool = typer.Option(False, "--post/--no-post", help="Post review comments to GitHub (opt-in)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Do not post to GitHub"),
 ) -> None:
     """Review a GitHub pull request and optionally post structured comments."""
     settings = Settings()
     if dry_run:
         settings.dry_run = True
+        post = False
 
     config = _load_config(config_path)
     owner, repo, number = parse_pr_ref(pr_ref)
@@ -75,19 +76,25 @@ def review_pr(
     if post and not dry_run and not token:
         raise typer.BadParameter("GITHUB_TOKEN is required to post reviews")
 
-    pr_context = None
-    if token:
-        gh = GitHubClient(token)
-        pr_context = gh.fetch_pull_request(owner, repo, number)
-    else:
+    if not token:
         raise typer.BadParameter("GITHUB_TOKEN is required to fetch PR data")
+
+    gh = GitHubClient(token)
+    pr_context = gh.fetch_pull_request(owner, repo, number)
 
     orchestrator = ReviewOrchestrator(repo_root=repo_root.resolve(), config=config, settings=settings)
     report = orchestrator.run(pr_context)
     _save_report(report, output)
     _print_report(report)
 
-    if post and token and not dry_run:
+    should_post = post and token and not dry_run and not settings.dry_run
+    if should_post and not settings.llm_api_key:
+        console.print(
+            "[yellow]LLM_API_KEY is not set — posting heuristic-only review. "
+            "Pass --no-post to skip, or set LLM_API_KEY for LLM-backed analysis.[/yellow]"
+        )
+
+    if should_post:
         posted = gh.post_review(
             report,
             dry_run=False,
@@ -136,6 +143,11 @@ def eval_benchmark(
         f"[bold]Benchmark complete[/bold] — cases: {summary['case_count']} | "
         f"avg precision: {summary['precision']} | avg recall: {summary['recall']}"
     )
+    if "production_summary" in results:
+        prod = results.get("posting_thresholds_summary") or results["production_summary"]
+        console.print(
+            f"[bold]Posting-threshold gate[/bold] — avg precision: {prod['precision']} | avg recall: {prod['recall']}"
+        )
     table = Table("Case", "Precision", "Recall", "TP", "FP", "FN")
     for case in results["cases"]:
         table.add_row(
@@ -225,6 +237,8 @@ def index_knowledge(
         f"[bold green]Indexed {stats.chunks} chunks[/bold green] from {stats.documents} documents "
         f"into [cyan]{stats.repo}[/cyan]"
     )
+    if stats.deleted_paths:
+        console.print(f"[yellow]Removed {stats.deleted_paths} stale path(s) from the index[/yellow]")
     if stats.by_source:
         table = Table("Source", "Chunks")
         for source, count in sorted(stats.by_source.items()):

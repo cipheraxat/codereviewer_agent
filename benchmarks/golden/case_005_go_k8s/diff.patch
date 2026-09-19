@@ -1,0 +1,36 @@
+diff --git a/deploy/deployment.yaml b/deploy/deployment.yaml
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/deploy/deployment.yaml
+@@ -0,0 +1,18 @@
++apiVersion: apps/v1
++kind: Deployment
++metadata:
++  name: endpoint-slice-controller
++spec:
++  template:
++    spec:
++      containers:
++        - name: controller
++          image: registry.k8s.io/endpoint-slice-controller:v1
++          securityContext:
++            privileged: true
++          ports:
++            - containerPort: 8080
+diff --git a/pkg/metrics/controller.go b/pkg/metrics/controller.go
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/pkg/metrics/controller.go
+@@ -0,0 +1,12 @@
++package metrics
++
++import "k8s.io/component-base/metrics"
++
++var endpointSliceControllerChanges = metrics.NewCounter(
++	&metrics.CounterOpts{
++		Name: "endpoint_slice_controller_changes",
++		Help: "Number of EndpointSlice changes processed by the controller.",
++	},
++)

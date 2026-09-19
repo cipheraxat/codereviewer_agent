@@ -68,19 +68,36 @@ def _is_blocked_finding(finding: Finding, blocked: list[str]) -> bool:
     return any(fragment.lower() in title for fragment in blocked)
 
 
+def _eval_config(config: ReviewerConfig, *, production: bool) -> ReviewerConfig:
+    if production:
+        # Posting-threshold gate: keep production severity/confidence/precision_mode.
+        # LLM verify/fact-check stay off so the gate is deterministic without an API key.
+        # Name reflects thresholds, not the full production LLM path.
+        return config.model_copy(
+            update={
+                "ensemble": config.ensemble.model_copy(update={"llm_verify": False, "fact_check": False}),
+                "review": config.review.model_copy(update={"use_tools": False}),
+            }
+        )
+    return config.model_copy(
+        update={
+            "severity_threshold": Severity.LOW,
+            "ensemble": config.ensemble.model_copy(update={"llm_verify": False, "fact_check": False}),
+            "posting": config.posting.model_copy(update={"min_confidence": 0.55}),
+            "review": config.review.model_copy(update={"use_tools": False, "precision_mode": False}),
+        }
+    )
+
+
 def evaluate_case(
     case: GoldenCase,
     config: ReviewerConfig,
     settings: Settings,
     *,
     repo_root: Path,
+    production: bool = False,
 ) -> CaseResult:
-    eval_config = config.model_copy(
-    update={
-      "severity_threshold": Severity.LOW,
-      "ensemble": config.ensemble.model_copy(update={"llm_verify": False}),
-    }
-  )
+    eval_config = _eval_config(config, production=production)
     diff_text = case.diff_path.read_text()
     pr = synthetic_pr_from_diff(diff_text, title=f"Eval case {case.name}")
     fixture_root = case.repo_fixture or repo_root
@@ -123,6 +140,16 @@ def evaluate_case(
     )
 
 
+def _summarize(results: list[CaseResult]) -> dict[str, Any]:
+    if not results:
+        return {"precision": 0.0, "recall": 0.0, "case_count": 0}
+    return {
+        "precision": round(sum(r.precision for r in results) / len(results), 3),
+        "recall": round(sum(r.recall for r in results) / len(results), 3),
+        "case_count": len(results),
+    }
+
+
 def run_benchmark(
     benchmark_dir: Path,
     config: ReviewerConfig,
@@ -131,16 +158,16 @@ def run_benchmark(
     repo_root: Path,
 ) -> dict[str, Any]:
     cases = sorted(
-        [GoldenCase.load(path) for path in benchmark_dir.iterdir() if path.is_dir() and (path / "labels.json").exists()],
+        [
+            GoldenCase.load(path)
+            for path in benchmark_dir.iterdir()
+            if path.is_dir() and (path / "labels.json").exists()
+        ],
         key=lambda c: c.name,
     )
     results = [evaluate_case(case, config, settings, repo_root=repo_root) for case in cases]
-
-    if not results:
-        return {"cases": [], "summary": {"precision": 0.0, "recall": 0.0, "case_count": 0}}
-
-    avg_precision = round(sum(r.precision for r in results) / len(results), 3)
-    avg_recall = round(sum(r.recall for r in results) / len(results), 3)
+    # Production-config gate: measure the same cases under real posting thresholds.
+    production_results = [evaluate_case(case, config, settings, repo_root=repo_root, production=True) for case in cases]
 
     return {
         "cases": [
@@ -155,9 +182,20 @@ def run_benchmark(
             }
             for r in results
         ],
-        "summary": {
-            "precision": avg_precision,
-            "recall": avg_recall,
-            "case_count": len(results),
-        },
+        "summary": _summarize(results),
+        # Deterministic gate under production posting thresholds (not full LLM path).
+        "posting_thresholds_summary": _summarize(production_results),
+        "production_summary": _summarize(production_results),  # alias for backward compat
+        "production_cases": [
+            {
+                "name": r.name,
+                "precision": r.precision,
+                "recall": r.recall,
+                "true_positives": r.true_positives,
+                "false_positives": r.false_positives,
+                "false_negatives": r.false_negatives,
+                "finding_count": len(r.findings),
+            }
+            for r in production_results
+        ],
     }

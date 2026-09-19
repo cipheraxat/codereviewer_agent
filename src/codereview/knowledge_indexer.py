@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +10,7 @@ from codereview.config import ReviewerConfig, Settings
 from codereview.embeddings import EmbeddingClient
 from codereview.external_context import ExternalContextFetcher
 from codereview.models import KnowledgeDocument
+from codereview.path_utils import is_denied_path, should_ignore_path
 from codereview.vector_store import SupabaseVectorStore
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ class IndexStats:
     chunks: int = 0
     by_source: dict[str, int] = field(default_factory=dict)
     skipped_sources: list[str] = field(default_factory=list)
+    deleted_paths: int = 0
 
 
 class KnowledgeIndexer:
@@ -94,6 +95,7 @@ class KnowledgeIndexer:
 
         stats.documents = len(documents)
         chunk_cfg = self.config.vector.supabase
+        keep_paths = {doc.path for doc in documents}
 
         for doc in documents:
             chunks = chunk_text(doc.content, chunk_cfg.max_chunk_chars, chunk_cfg.chunk_overlap)
@@ -112,6 +114,18 @@ class KnowledgeIndexer:
                 )
             stats.chunks += embedded
             stats.by_source[doc.source] = stats.by_source.get(doc.source, 0) + embedded
+
+        # Drop stale rows for paths no longer in the current document set (code only —
+        # external docs may rotate by JQL and shouldn't wipe unrelated tickets mid-run).
+        if "code" in selected and hasattr(self.vector_store, "delete_missing_paths"):
+            try:
+                stats.deleted_paths = self.vector_store.delete_missing_paths(
+                    repo_slug,
+                    keep_paths,
+                    source="code",
+                )
+            except Exception as exc:
+                logger.warning("Stale path cleanup skipped: %s", exc)
 
         return stats
 
@@ -133,7 +147,7 @@ class KnowledgeIndexer:
                 if not path.is_file():
                     continue
                 rel_path = str(path.relative_to(self.repo_root))
-                if rel_path in seen or self._should_ignore(rel_path):
+                if rel_path in seen or self._should_ignore(rel_path) or is_denied_path(rel_path):
                     continue
                 seen.add(rel_path)
                 try:
@@ -153,4 +167,4 @@ class KnowledgeIndexer:
         return documents
 
     def _should_ignore(self, path: str) -> bool:
-        return any(fnmatch.fnmatch(path, pattern) for pattern in self.config.ignore_globs)
+        return should_ignore_path(path, self.config.ignore_globs)

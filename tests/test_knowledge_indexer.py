@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from codereview.config import ExternalContextConfig, ReviewerConfig, VectorConfig
 from codereview.context_engine import ContextEngine
 from codereview.knowledge_indexer import KnowledgeIndexer
-from codereview.models import KnowledgeDocument, PullRequestContext
+from codereview.models import PullRequestContext
 
 
 def test_knowledge_indexer_collects_code_documents(tmp_path: Path) -> None:

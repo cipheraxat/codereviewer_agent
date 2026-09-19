@@ -1,6 +1,5 @@
+from codereview.external_context import extract_confluence_page_ids, extract_ticket_keys
 from codereview.models import PullRequestContext
-
-from codereview.external_context import extract_ticket_keys, extract_confluence_page_ids
 
 
 def test_extract_ticket_keys_from_title_and_branch() -> None:

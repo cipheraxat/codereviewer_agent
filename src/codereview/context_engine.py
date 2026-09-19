@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import fnmatch
 import logging
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from codereview.chunking import chunk_text
 from codereview.config import ReviewerConfig, Settings
 from codereview.embeddings import EmbeddingClient
 from codereview.external_context import ExternalContextFetcher, repo_slug
 from codereview.models import CodeSnippet, PullRequestContext
+from codereview.path_utils import is_denied_path, should_ignore_path
 from codereview.vector_store import SupabaseVectorStore
 
 logger = logging.getLogger(__name__)
@@ -36,13 +36,15 @@ CODE_EXTENSIONS = {
     ".md",
 }
 
+MAX_NEIGHBOR_FILES = 50
+
 
 def _tokenize(text: str) -> list[str]:
     return re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text.lower())
 
 
 def _should_ignore(path: str, ignore_globs: list[str]) -> bool:
-    return any(fnmatch.fnmatch(path, pattern) for pattern in ignore_globs)
+    return should_ignore_path(path, ignore_globs)
 
 
 def _is_code_file(path: Path) -> bool:
@@ -60,7 +62,7 @@ class ContextEngine:
         self,
         repo_root: Path,
         config: ReviewerConfig,
-        settings: Optional[Settings] = None,
+        settings: Settings | None = None,
         *,
         embeddings: Any | None = None,
         vector_store: Any | None = None,
@@ -83,7 +85,9 @@ class ContextEngine:
         )
 
     def build_context(self, pr: PullRequestContext) -> list[CodeSnippet]:
-        changed = [f for f in pr.changed_files if not _should_ignore(f, self.config.ignore_globs)]
+        changed = [
+            f for f in pr.changed_files if not _should_ignore(f, self.config.ignore_globs) and not is_denied_path(f)
+        ]
         query_terms = self._build_query_terms(pr, changed)
         candidates: dict[str, CodeSnippet] = {}
 
@@ -235,18 +239,30 @@ class ContextEngine:
             if parent_dir.exists():
                 for child in parent_dir.iterdir():
                     if child.is_file() and _is_code_file(child):
-                        neighbors.append(str(parent / child.name))
+                        candidate = str(parent / child.name)
+                        if is_denied_path(candidate) or _should_ignore(candidate, self.config.ignore_globs):
+                            continue
+                        neighbors.append(candidate)
+                        if len(neighbors) >= MAX_NEIGHBOR_FILES:
+                            return neighbors
 
         for _ in range(depth):
             for path in list(neighbors):
+                if len(neighbors) >= MAX_NEIGHBOR_FILES:
+                    return neighbors
                 parent_dir = (self.repo_root / path).parent
                 if not parent_dir.exists():
                     continue
                 for child in parent_dir.iterdir():
                     if child.is_file() and _is_code_file(child):
                         candidate = str(child.relative_to(self.repo_root))
-                        if candidate not in neighbors:
-                            neighbors.append(candidate)
+                        if candidate in neighbors:
+                            continue
+                        if is_denied_path(candidate) or _should_ignore(candidate, self.config.ignore_globs):
+                            continue
+                        neighbors.append(candidate)
+                        if len(neighbors) >= MAX_NEIGHBOR_FILES:
+                            return neighbors
         return neighbors
 
     def _read_truncated(self, path: Path) -> str:
@@ -273,7 +289,6 @@ class ContextEngine:
         blocks: list[str] = []
         for snippet in snippets:
             blocks.append(
-                f"### {snippet.path} (score={snippet.score:.2f}, {snippet.reason})\n"
-                f"```\n{snippet.content}\n```"
+                f"### {snippet.path} (score={snippet.score:.2f}, {snippet.reason})\n```\n{snippet.content}\n```"
             )
         return "\n\n".join(blocks)

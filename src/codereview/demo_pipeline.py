@@ -3,17 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from codereview.chunking import chunk_text
 from codereview.config import ReviewerConfig, Settings
 from codereview.context_engine import ContextEngine
-from codereview.embeddings import EmbeddingClient
 from codereview.github_client import synthetic_pr_from_diff
 from codereview.graph import ReviewOrchestrator
 from codereview.in_memory_vector_store import InMemoryVectorStore
 from codereview.knowledge_indexer import IndexStats, KnowledgeIndexer
 from codereview.local_embeddings import LocalEmbeddingClient
 from codereview.mock_knowledge import DEFAULT_FIXTURES_DIR, MockKnowledgeProvider
-from codereview.models import CodeSnippet, PullRequestContext, ReviewReport
+from codereview.models import CodeSnippet, ReviewReport
 
 
 @dataclass
@@ -57,9 +55,12 @@ def run_demo_pipeline(
     index_stats = indexer.run(repo_slug, sources=["code", "jira", "confluence"])
 
     diff_text = diff_file.read_text(encoding="utf-8")
-    pr = synthetic_pr_from_diff(diff_text, title=pr_title)
-    pr.body = pr_body
-    pr.head_ref = "feature/CP-123-auth-hardening"
+    pr = synthetic_pr_from_diff(
+        diff_text,
+        title=pr_title,
+        body=pr_body,
+        head_ref="feature/CP-123-auth-hardening",
+    )
 
     context_engine = ContextEngine(
         repo_root=repo_root,
