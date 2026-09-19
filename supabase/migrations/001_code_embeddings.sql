@@ -48,5 +48,8 @@ as $$
   limit match_count;
 $$;
 
--- Optional: allow service role full access (default in Supabase for service role)
+-- Optional: enable RLS and restrict to service role only.
+-- Do NOT use the anon key against this table — embeddings may contain code snippets.
 -- alter table public.code_embeddings enable row level security;
+-- create policy "service_role_all" on public.code_embeddings
+--   for all using (auth.role() = 'service_role') with check (auth.role() = 'service_role');

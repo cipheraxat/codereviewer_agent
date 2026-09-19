@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
-
-import httpx
 
 from codereview.config import Settings
 
@@ -18,29 +15,53 @@ class EmbeddingClient:
         self.model = settings.resolved_embedding_model()
 
     @property
+    def _embedding_key(self) -> str | None:
+        return self.settings.embedding_api_key or self.settings.llm_api_key
+
+    @property
     def available(self) -> bool:
-        return bool(self.settings.llm_api_key)
+        if not self._embedding_key:
+            return False
+        # Anthropic has no embeddings API — require a dedicated OpenAI-compatible key.
+        if self.settings.llm_provider.lower() == "anthropic" and not self.settings.embedding_api_key:
+            return False
+        return True
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        if self.settings.llm_provider.lower() == "anthropic" and not self.settings.embedding_api_key:
+            raise RuntimeError(
+                "Anthropic has no embeddings API. Set EMBEDDING_API_KEY to an OpenAI-compatible key "
+                "(and optionally EMBEDDING_MODEL), or set LLM_PROVIDER=openrouter|openai."
+            )
         if not self.available:
-            raise RuntimeError("LLM_API_KEY is required for embeddings")
+            raise RuntimeError("LLM_API_KEY or EMBEDDING_API_KEY is required for embeddings")
 
-        provider = self.settings.llm_provider.lower()
-        if provider == "anthropic":
-            return self._embed_openai_compatible(texts, base_url=None)
-        if provider == "openrouter":
-            return self._embed_openai_compatible(texts, base_url=self.settings.openrouter_base_url)
-        return self._embed_openai_compatible(texts, base_url=None)
+        base_url = self._resolve_base_url()
+        return self._embed_openai_compatible(texts, base_url=base_url, api_key=self._embedding_key)
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_texts([text])[0]
 
-    def _embed_openai_compatible(self, texts: list[str], base_url: Optional[str]) -> list[list[float]]:
+    def _resolve_base_url(self) -> str | None:
+        # Dedicated embedding key → OpenAI-compatible default endpoint.
+        if self.settings.embedding_api_key:
+            return None
+        if self.settings.llm_provider.lower() == "openrouter":
+            return self.settings.openrouter_base_url
+        return None
+
+    def _embed_openai_compatible(
+        self,
+        texts: list[str],
+        *,
+        base_url: str | None,
+        api_key: str | None,
+    ) -> list[list[float]]:
         from openai import OpenAI
 
-        kwargs: dict = {"api_key": self.settings.llm_api_key}
+        kwargs: dict = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
             kwargs["default_headers"] = {"X-Title": self.settings.openrouter_app_name}

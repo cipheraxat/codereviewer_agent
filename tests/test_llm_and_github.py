@@ -1,4 +1,3 @@
-import json
 from unittest.mock import MagicMock, patch
 
 from codereview.github_client import GitHubClient
@@ -29,7 +28,7 @@ def test_llm_retries_then_raises() -> None:
         with patch("codereview.llm.time.sleep"):
             try:
                 client.complete_json("system", "user")
-                assert False, "expected RuntimeError"
+                raise AssertionError("expected RuntimeError")
             except RuntimeError as exc:
                 assert "after retries" in str(exc)
 

@@ -4,7 +4,6 @@ import math
 from dataclasses import dataclass, field
 
 from codereview.config import SupabaseConfig
-from codereview.external_context import content_hash
 from codereview.models import CodeSnippet
 
 
@@ -37,6 +36,15 @@ class InMemoryVectorStore:
             return
         self._chunks = [chunk for chunk in self._chunks if chunk.repo != repo]
 
+    def delete_missing_paths(self, repo: str, keep_paths: set[str], *, source: str = "code") -> int:
+        before = len(self._chunks)
+        self._chunks = [
+            chunk
+            for chunk in self._chunks
+            if not (chunk.repo == repo and chunk.source == source and chunk.path not in keep_paths)
+        ]
+        return before - len(self._chunks)
+
     def upsert_embeddings(
         self,
         repo: str,
@@ -49,11 +57,7 @@ class InMemoryVectorStore:
         if not chunks:
             return 0
 
-        self._chunks = [
-            chunk
-            for chunk in self._chunks
-            if not (chunk.repo == repo and chunk.path == path)
-        ]
+        self._chunks = [chunk for chunk in self._chunks if not (chunk.repo == repo and chunk.path == path)]
 
         for index, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             self._chunks.append(

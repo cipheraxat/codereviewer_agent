@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 
@@ -8,7 +9,9 @@ from github import Auth, Github
 from github.GithubException import GithubException
 from github.PullRequest import PullRequest
 
-from codereview.models import Finding, PullRequestContext, ReviewReport
+from codereview.models import PullRequestContext, ReviewReport
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -29,10 +32,16 @@ class GitHubClient:
         changed_files: list[str] = []
         patches: dict[str, str] = {}
         for file in files:
-            if file.filename:
-                changed_files.append(file.filename)
-                if file.patch:
-                    patches[file.filename] = file.patch
+            if not file.filename:
+                continue
+            changed_files.append(file.filename)
+            if file.patch:
+                patches[file.filename] = file.patch
+            else:
+                logger.info(
+                    "No patch for %s (too large, binary, or rename-only); excluded from review",
+                    file.filename,
+                )
 
         return PullRequestContext(
             owner=owner,
@@ -140,7 +149,7 @@ class GitHubClient:
         if report.metrics.latency_ms:
             lines.append(f"Latency: {report.metrics.latency_ms} ms")
         if report.metrics.estimated_cost_usd:
-            lines.append(f"Estimated LLM cost: ${report.metrics.estimated_cost_usd:.4f}")
+            lines.append(f"Estimated LLM cost (rough): ${report.metrics.estimated_cost_usd:.4f}")
 
         if report.metrics.llm_degraded:
             lines.append("LLM status: degraded (heuristic fallback used for one or more steps)")
@@ -220,7 +229,14 @@ def parse_unified_diff(diff_text: str) -> tuple[list[str], dict[str, str]]:
     return changed_files, patches
 
 
-def synthetic_pr_from_diff(diff_text: str, title: str = "Local diff review") -> PullRequestContext:
+def synthetic_pr_from_diff(
+    diff_text: str,
+    title: str = "Local diff review",
+    *,
+    body: str | None = None,
+    head_ref: str = "feature",
+    base_ref: str = "main",
+) -> PullRequestContext:
     changed_files, patches = parse_unified_diff(diff_text)
     digest = hashlib.sha1(diff_text.encode("utf-8")).hexdigest()[:12]
     return PullRequestContext(
@@ -228,10 +244,10 @@ def synthetic_pr_from_diff(diff_text: str, title: str = "Local diff review") -> 
         repo="workspace",
         number=0,
         title=title,
-        body=None,
+        body=body,
         head_sha=digest,
-        base_ref="main",
-        head_ref="feature",
+        base_ref=base_ref,
+        head_ref=head_ref,
         changed_files=changed_files,
         patches=patches,
     )

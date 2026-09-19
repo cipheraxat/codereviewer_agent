@@ -3,12 +3,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from typing import Optional
-from urllib.parse import urlparse
 
 import httpx
 
-from codereview.config import ConfluenceConfig, ExternalContextConfig, JiraConfig
+from codereview.config import ExternalContextConfig
 from codereview.models import CodeSnippet, KnowledgeDocument, PullRequestContext
 
 logger = logging.getLogger(__name__)
@@ -56,9 +54,9 @@ class ExternalContextFetcher:
         self,
         config: ExternalContextConfig,
         *,
-        atlassian_email: Optional[str] = None,
-        atlassian_api_token: Optional[str] = None,
-        atlassian_domain: Optional[str] = None,
+        atlassian_email: str | None = None,
+        atlassian_api_token: str | None = None,
+        atlassian_domain: str | None = None,
     ) -> None:
         self.config = config
         self.email = atlassian_email
@@ -244,7 +242,7 @@ class ExternalContextFetcher:
                 snippets.append(issue)
         return snippets
 
-    def _get_jira_issue(self, key: str) -> Optional[CodeSnippet]:
+    def _get_jira_issue(self, key: str) -> CodeSnippet | None:
         url = f"https://{self.domain}/rest/api/3/issue/{key}"
         try:
             with httpx.Client(timeout=15.0) as client:
@@ -338,7 +336,7 @@ class ExternalContextFetcher:
                 continue
         return list(dict.fromkeys(ids))
 
-    def _get_confluence_page(self, page_id: str) -> Optional[CodeSnippet]:
+    def _get_confluence_page(self, page_id: str) -> CodeSnippet | None:
         url = f"https://{self.domain}/wiki/rest/api/content/{page_id}"
         params = {"expand": "body.storage,title"}
         try:

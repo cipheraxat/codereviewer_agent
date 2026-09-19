@@ -1,0 +1,17 @@
+{
+  "expected": [
+    {
+      "title_contains": "privileged",
+      "severity": "high",
+      "file": "deploy/deployment.yaml",
+      "category": "security"
+    },
+    {
+      "title_contains": "_total",
+      "severity": "medium",
+      "file": "pkg/metrics/controller.go",
+      "category": "quality"
+    }
+  ],
+  "should_not_find": ["hardcoded secret"]
+}

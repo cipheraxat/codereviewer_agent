@@ -4,10 +4,12 @@ languages:
   - python
   - typescript
   - javascript
+  - go
 
 ignore_globs:
   - "**/node_modules/**"
   - "**/.venv/**"
+  - "**/.venv311/**"
   - "**/dist/**"
   - "**/build/**"
   - "**/*.lock"
@@ -28,10 +30,12 @@ custom_rules:
     severity: medium
     category: quality
 
-  - id: no-bare-except
-    description: Avoid bare except clauses; catch specific exceptions.
-    pattern: "except:\\s*$"
-    severity: low
+  # bare-except / privileged-container covered by built-in python + yaml rule packs
+
+  - id: prometheus-counter-total
+    description: Prometheus counter metrics should use the _total suffix for stable metrics compliance.
+    pattern: "Name:\\s*\"[a-z0-9_]+_changes\""
+    severity: medium
     category: quality
 
 team_conventions: |
@@ -80,8 +84,20 @@ vector:
     vector_top_k: 12
 
 posting:
-  min_confidence: 0.55
+  min_confidence: 0.70
   max_inline_comments: 25
 
 ensemble:
   llm_verify: true
+  fact_check: true
+
+# OCR-inspired harness: select/bundle files, language packs, tools, effort
+review:
+  effort: medium          # low | medium | high
+  use_tools: true         # enrich context via file_read / code_search
+  precision_mode: true
+  max_files_per_bundle: 8
+  max_bundles: 4
+  max_diff_chars_per_file: 40000
+  # rule_packs: [python, typescript, javascript, yaml]  # defaults to `languages` + yaml
+

@@ -32,6 +32,26 @@ inputs:
     description: "GitHub token for fetching/posting PR reviews. Pass a GitHub App installation token to post as codereview-agent[bot] instead of github-actions[bot]."
     required: false
     default: ""
+  atlassian_email:
+    description: "Atlassian account email (optional JIRA/Confluence)"
+    required: false
+    default: ""
+  atlassian_api_token:
+    description: "Atlassian API token (optional JIRA/Confluence)"
+    required: false
+    default: ""
+  atlassian_domain:
+    description: "Atlassian domain, e.g. yourcompany.atlassian.net"
+    required: false
+    default: ""
+  supabase_url:
+    description: "Supabase project URL for unified RAG"
+    required: false
+    default: ""
+  supabase_service_role_key:
+    description: "Supabase service role key for unified RAG"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -54,18 +74,20 @@ runs:
         LLM_PROVIDER: ${{ inputs.llm_provider }}
         LLM_MODEL: ${{ inputs.llm_model }}
         GITHUB_TOKEN: ${{ inputs.github_token != '' && inputs.github_token || github.token }}
-        ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
-        ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
-        ATLASSIAN_DOMAIN: ${{ secrets.ATLASSIAN_DOMAIN }}
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        ATLASSIAN_EMAIL: ${{ inputs.atlassian_email }}
+        ATLASSIAN_API_TOKEN: ${{ inputs.atlassian_api_token }}
+        ATLASSIAN_DOMAIN: ${{ inputs.atlassian_domain }}
+        SUPABASE_URL: ${{ inputs.supabase_url }}
+        SUPABASE_SERVICE_ROLE_KEY: ${{ inputs.supabase_service_role_key }}
       run: |
         ARGS=(review-pr "${{ github.repository }}#${{ github.event.pull_request.number }}" --repo-root "${{ inputs.repo_root }}" --output review-report.json)
         if [[ -f "${{ inputs.config_path }}" ]]; then
           ARGS+=(--config "${{ inputs.config_path }}")
         fi
         if [[ "${{ inputs.dry_run }}" == "true" ]]; then
-          ARGS+=(--dry-run)
+          ARGS+=(--dry-run --no-post)
+        else
+          ARGS+=(--post)
         fi
         codereview "${ARGS[@]}"
 

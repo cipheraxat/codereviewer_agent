@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -34,18 +34,20 @@ class Finding(BaseModel):
     category: FindingCategory
     severity: Severity
     title: str
-    file: Optional[str] = None
-    line: Optional[int] = None
+    file: str | None = None
+    line: int | None = None
     rationale: str
     suggestion: str
     confidence: float = Field(ge=0.0, le=1.0)
     agent: str = "unknown"
-    rule_id: Optional[str] = None
+    rule_id: str | None = None
+    # OCR-style anchor: consecutive added lines from the diff used to resolve `line`.
+    evidence_snippet: str | None = None
 
-    def location_key(self) -> tuple[str, Optional[str], Optional[int]]:
+    def location_key(self) -> tuple[str, str | None, int | None]:
         return (self.category.value, self.file, self.line)
 
-    def dedupe_key(self) -> tuple[str, Optional[str], Optional[int]]:
+    def dedupe_key(self) -> tuple[str, str | None, int | None]:
         return (self.title.lower().strip(), self.file, self.line)
 
 
@@ -69,7 +71,7 @@ class PullRequestContext(BaseModel):
     repo: str
     number: int
     title: str
-    body: Optional[str] = None
+    body: str | None = None
     head_sha: str
     base_ref: str
     head_ref: str
@@ -82,20 +84,20 @@ class ReviewMetrics(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     estimated_cost_usd: float = 0.0
-    llm_provider: Optional[str] = None
-    llm_model: Optional[str] = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
     llm_degraded: bool = False
 
 
 class ReviewReport(BaseModel):
-    pr: Optional[PullRequestContext] = None
+    pr: PullRequestContext | None = None
     findings: list[Finding] = Field(default_factory=list)
     summary: str = ""
     overall_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     verdict: str = "comment"  # approve | request_changes | comment
     metrics: ReviewMetrics = Field(default_factory=ReviewMetrics)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    commit_sha: Optional[str] = None
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    commit_sha: str | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
