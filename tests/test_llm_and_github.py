@@ -65,3 +65,48 @@ def test_post_review_respects_max_inline_comments() -> None:
     gh = GitHubClient("token")
     comments = gh._format_inline_comments(report, max_inline_comments=2)
     assert len(comments) == 2
+
+
+def test_post_review_falls_back_when_actions_cannot_approve() -> None:
+    from github import GithubException
+
+    pr = PullRequestContext(
+        owner="o",
+        repo="r",
+        number=1,
+        title="t",
+        body=None,
+        head_sha="abc123",
+        base_ref="main",
+        head_ref="feature",
+        changed_files=["a.py"],
+        patches={},
+    )
+    report = ReviewReport(pr=pr, findings=[], summary="clean", overall_confidence=1.0, verdict="approve")
+
+    gh = GitHubClient("token")
+    mock_pr = MagicMock()
+    mock_pr.get_reviews.return_value = []
+    mock_pr.create_review.side_effect = [
+        GithubException(
+            422,
+            {
+                "message": "Unprocessable Entity",
+                "errors": ["GitHub Actions is not permitted to approve pull requests."],
+            },
+            None,
+        ),
+        MagicMock(id=42),
+    ]
+    mock_repo = MagicMock()
+    mock_repo.get_pull.return_value = mock_pr
+    mock_repo.get_commit.return_value = MagicMock()
+
+    with patch.object(gh, "_gh") as mock_gh:
+        mock_gh.get_repo.return_value = mock_repo
+        posted = gh.post_review(report, dry_run=False)
+
+    assert posted is not None
+    assert posted.review_id == 42
+    assert mock_pr.create_review.call_count == 2
+    assert mock_pr.create_review.call_args_list[1].kwargs["event"] == "COMMENT"

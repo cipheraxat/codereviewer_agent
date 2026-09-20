@@ -95,7 +95,12 @@ class GitHubClient:
                 comments=comments,
             )
         except GithubException as exc:
-            if event == "REQUEST_CHANGES" and "own pull request" in str(exc).lower():
+            message = str(exc).lower()
+            # GITHUB_TOKEN cannot APPROVE unless the repo allows Actions to approve PRs.
+            # Also cannot REQUEST_CHANGES on the actor's own PR.
+            if event in {"APPROVE", "REQUEST_CHANGES"} and (
+                "not permitted to approve" in message or "own pull request" in message
+            ):
                 review = pr.create_review(
                     commit=repository.get_commit(commit_sha),
                     body=body,
