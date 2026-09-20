@@ -2,7 +2,7 @@
 
 Production-style PR review pipeline for GitHub: batch-index knowledge into Supabase, retrieve relevant context at review time, run parallel security and pattern agents, ensemble the findings, and post structured review comments.
 
-**v0.5.3** — OCR-inspired precision harness on top of optional Atlassian RAG (JIRA + Confluence in Supabase):
+**v0.5.4** — OCR-inspired precision harness on top of optional Atlassian RAG (JIRA + Confluence in Supabase):
 
 | Layer | What changed |
 |---|---|
@@ -10,7 +10,7 @@ Production-style PR review pipeline for GitHub: batch-index knowledge into Supab
 | **Context** | OCR select/bundle + tools + BM25 for code; optional Supabase vectors for JIRA/Confluence only |
 | **Agents** | Language rule packs (python/ts/js/go/yaml) + heuristics; findings carry `evidence_snippet` for line re-location |
 | **Ensemble** | Semantic dedupe → optional LLM verify → OCR-style fact-check (drop only what the diff disproves) → precision posting |
-| **Safety** | Evidence redaction on all categories; `EMBEDDING_API_KEY` when chat is Anthropic; Action secrets passed as inputs |
+| **Safety** | Evidence redaction; untrusted PR content delimited; heuristic findings protected from fact-check wipe; Action pinned (not `./action`); RLS on embeddings |
 
 ```mermaid
 flowchart LR
@@ -432,7 +432,7 @@ See [`docs/images/github-review-example.svg`](docs/images/github-review-example.
 - Semantic finding dedupe (merges similar titles without collapsing distinct adjacent issues)
 - Accurate line numbers from diff hunks + evidence re-location
 - Optional **JIRA / Confluence** indexing (fail-open, disabled by default)
-- Benchmark eval suite with dual CI gate (5 golden cases; heuristic + posting-threshold summaries)
+- Benchmark eval suite with dual CI gate (6 golden cases incl. prompt-injection; heuristic + posting-threshold summaries)
 - Parallel specialist agents with LangGraph fan-out/fan-in and per-bundle review
 - Ensemble verifier with optional LLM cross-check and OCR-style fact-check filter
 - Works offline with `review-diff` (no GitHub API)
@@ -690,10 +690,12 @@ Measure precision/recall on labeled golden diffs:
 codereview eval --benchmark-dir benchmarks/golden --output benchmarks/results.json
 ```
 
-Use this to tune `severity_threshold`, compare OpenRouter models, and catch regressions when changing prompts or agents. CI enforces on **5** golden cases:
+Use this to tune `severity_threshold`, compare OpenRouter models, and catch regressions when changing prompts or agents. CI enforces on **6** golden cases (includes a prompt-injection probe):
 
 - Heuristic gate: recall ≥ 0.9, precision ≥ 0.65
 - Posting-threshold gate: production `severity_threshold` / `min_confidence` / `precision_mode` with LLM verify/fact-check off (deterministic)
+
+For a real LLM-path eval, run the same command with `LLM_API_KEY` set outside CI (nightly recommended). Heuristics-only CI does not prove model quality.
 
 See [`benchmarks/README.md`](benchmarks/README.md) to add more cases (target 20+ real PRs over time).
 
@@ -720,6 +722,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Pin to a commit SHA in production: action@<sha> (never ./action after PR checkout)
       - uses: cipheraxat/codereviewer_agent/action@main
         with:
           llm_api_key: ${{ secrets.LLM_API_KEY }}
@@ -752,7 +755,7 @@ Reviews post as **github-actions[bot]** using the default `GITHUB_TOKEN`.
 
 1. Add `reviewer.yaml` with your team's ignore paths and custom rules
 2. Create repo secret `LLM_API_KEY` (required for LLM reviews)
-3. **Optional Atlassian RAG:** set `SUPABASE_*` + `ATLASSIAN_*` secrets, enable `vector` + `external_context` in YAML, push migrations, run `index-knowledge` once, keep `knowledge-index.yml` enabled for daily cron
+3. **Optional Atlassian RAG:** set `SUPABASE_*` + `ATLASSIAN_*` secrets, enable `vector` + `external_context` in YAML, push migrations `001`–`003`, run `index-knowledge` once, keep `knowledge-index.yml` enabled for daily cron
 4. **Skip Atlassian:** leave `vector.enabled: false` / `external_context.enabled: false` and omit Supabase secrets
 5. Enable the PR review workflow on `pull_request` (pass secrets as Action inputs)
 6. Start with `dry_run: true` for one sprint, then switch to live posting
@@ -810,6 +813,7 @@ src/codereview/
 supabase/migrations/
   001_code_embeddings.sql
   002_unified_knowledge_source.sql
+  003_rls_and_outcomes.sql   # RLS + review_finding_outcomes feedback table
 tests/fixtures/knowledge/  # mock JIRA/Confluence JSON for offline demo
 benchmarks/golden/         # 5 labeled PR diffs for eval + CI gate
 .github/workflows/

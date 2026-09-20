@@ -115,51 +115,68 @@ class ExternalContextFetcher:
             return []
 
         url = f"https://{self.domain}/rest/api/3/search"
-        params = {
-            "jql": jql,
-            "maxResults": self.config.jira.max_index_issues,
-            "fields": "summary,description," + ",".join(self.config.jira.acceptance_fields),
-        }
+        max_total = self.config.jira.max_index_issues
+        page_size = min(50, max_total)
+        documents: list[KnowledgeDocument] = []
+        start_at = 0
+
         try:
             with httpx.Client(timeout=30.0) as client:
-                response = client.get(url, params=params, auth=self._auth())
-                if response.status_code != 200:
-                    logger.warning("JIRA search for indexing returned %s", response.status_code)
-                    return []
-                issues = response.json().get("issues", [])
+                while len(documents) < max_total:
+                    params = {
+                        "jql": jql,
+                        "startAt": start_at,
+                        "maxResults": min(page_size, max_total - len(documents)),
+                        "fields": "summary,description," + ",".join(self.config.jira.acceptance_fields),
+                    }
+                    response = client.get(url, params=params, auth=self._auth())
+                    if response.status_code == 429:
+                        logger.warning("JIRA rate limited during indexing; stopping pagination")
+                        break
+                    if response.status_code != 200:
+                        logger.warning("JIRA search for indexing returned %s", response.status_code)
+                        break
+                    payload = response.json()
+                    issues = payload.get("issues", [])
+                    if not issues:
+                        break
+                    for issue in issues:
+                        documents.append(self._issue_to_document(issue))
+                        if len(documents) >= max_total:
+                            break
+                    start_at += len(issues)
+                    total = payload.get("total")
+                    if total is not None and start_at >= total:
+                        break
+                    if len(issues) < params["maxResults"]:
+                        break
         except httpx.HTTPError as exc:
             logger.warning("JIRA indexing search failed: %s", exc)
-            return []
+            return documents
 
-        documents: list[KnowledgeDocument] = []
-        for issue in issues:
-            key = issue.get("key", "")
-            fields = issue.get("fields", {})
-            summary = fields.get("summary", "")
-            description = self._jira_description_to_text(fields.get("description"))
-            acceptance = ""
-            for field_key in self.config.jira.acceptance_fields:
-                value = fields.get(field_key)
-                if value:
-                    acceptance = self._jira_description_to_text(value) if isinstance(value, dict) else str(value)
-                    break
-
-            body = f"Summary: {summary}\n\nDescription:\n{description}"
-            if acceptance:
-                body += f"\n\nAcceptance criteria:\n{acceptance}"
-
-            max_chars = self.config.max_chars_per_source
-            if len(body) > max_chars:
-                body = body[:max_chars] + "\n... [truncated]"
-
-            documents.append(
-                KnowledgeDocument(
-                    path=f"jira:{key}",
-                    content=body,
-                    source="jira",
-                )
-            )
         return documents
+
+    def _issue_to_document(self, issue: dict) -> KnowledgeDocument:
+        key = issue.get("key", "")
+        fields = issue.get("fields", {})
+        summary = fields.get("summary", "")
+        description = self._jira_description_to_text(fields.get("description"))
+        acceptance = ""
+        for field_key in self.config.jira.acceptance_fields:
+            value = fields.get(field_key)
+            if value:
+                acceptance = self._jira_description_to_text(value) if isinstance(value, dict) else str(value)
+                break
+
+        body = f"JIRA {key}\nSummary: {summary}\n\nDescription:\n{description}"
+        if acceptance:
+            body += f"\n\nAcceptance criteria:\n{acceptance}"
+
+        max_chars = self.config.max_chars_per_source
+        if len(body) > max_chars:
+            body = body[:max_chars] + "\n... [truncated]"
+
+        return KnowledgeDocument(path=f"jira:{key}", content=body, source="jira")
 
     def _fetch_confluence_for_indexing(self) -> list[KnowledgeDocument]:
         if not self.available:
@@ -183,40 +200,55 @@ class ExternalContextFetcher:
 
     def _list_confluence_pages(self, space_key: str, *, limit: int) -> list[KnowledgeDocument]:
         url = f"https://{self.domain}/wiki/rest/api/content"
-        params = {
-            "spaceKey": space_key,
-            "type": "page",
-            "limit": limit,
-            "expand": "body.storage,title",
-        }
+        documents: list[KnowledgeDocument] = []
+        start = 0
+        page_size = min(25, limit)
+
         try:
             with httpx.Client(timeout=30.0) as client:
-                response = client.get(url, params=params, auth=self._auth())
-                if response.status_code != 200:
-                    logger.warning("Confluence space %s listing returned %s", space_key, response.status_code)
-                    return []
-                results = response.json().get("results", [])
+                while len(documents) < limit:
+                    params = {
+                        "spaceKey": space_key,
+                        "type": "page",
+                        "start": start,
+                        "limit": min(page_size, limit - len(documents)),
+                        "expand": "body.storage,title",
+                    }
+                    response = client.get(url, params=params, auth=self._auth())
+                    if response.status_code == 429:
+                        logger.warning("Confluence rate limited for space %s; stopping pagination", space_key)
+                        break
+                    if response.status_code != 200:
+                        logger.warning("Confluence space %s listing returned %s", space_key, response.status_code)
+                        break
+                    results = response.json().get("results", [])
+                    if not results:
+                        break
+                    for page in results:
+                        page_id = page.get("id", "")
+                        title = page.get("title", page_id)
+                        html = ((page.get("body") or {}).get("storage") or {}).get("value", "")
+                        text = _html_to_text(html)
+                        body = f"Confluence page {page_id}\nTitle: {title}\n\n{text}"
+                        max_chars = self.config.max_chars_per_source
+                        if len(body) > max_chars:
+                            body = body[:max_chars] + "\n... [truncated]"
+                        documents.append(
+                            KnowledgeDocument(
+                                path=f"confluence:{page_id}",
+                                content=body,
+                                source="confluence",
+                            )
+                        )
+                        if len(documents) >= limit:
+                            break
+                    start += len(results)
+                    if len(results) < params["limit"]:
+                        break
         except httpx.HTTPError as exc:
             logger.warning("Confluence indexing failed for space %s: %s", space_key, exc)
-            return []
+            return documents
 
-        documents: list[KnowledgeDocument] = []
-        for page in results:
-            page_id = page.get("id", "")
-            title = page.get("title", page_id)
-            html = ((page.get("body") or {}).get("storage") or {}).get("value", "")
-            text = _html_to_text(html)
-            body = f"Title: {title}\n\n{text}"
-            max_chars = self.config.max_chars_per_source
-            if len(body) > max_chars:
-                body = body[:max_chars] + "\n... [truncated]"
-            documents.append(
-                KnowledgeDocument(
-                    path=f"confluence:{page_id}",
-                    content=body,
-                    source="confluence",
-                )
-            )
         return documents
 
     def _auth(self) -> tuple[str, str]:

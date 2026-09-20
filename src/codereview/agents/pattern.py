@@ -8,13 +8,15 @@ from codereview.finding_dedupe import dedupe_findings
 from codereview.llm import LLMClient, findings_from_payload
 from codereview.models import Finding, FindingCategory, PullRequestContext, Severity
 from codereview.path_utils import should_ignore_path
+from codereview.prompt_utils import UNTRUSTED_SYSTEM_ADDENDUM, build_delimited_user_prompt
 from codereview.rule_packs import all_applicable_rules
 
 logger = logging.getLogger(__name__)
 
-PATTERN_SYSTEM = """You are a senior software engineer reviewing code quality and team conventions.
+PATTERN_SYSTEM = f"""You are a senior software engineer reviewing code quality and team conventions.
+{UNTRUSTED_SYSTEM_ADDENDUM}
 Return JSON only with shape:
-{"findings":[{"category":"quality|testing|documentation|performance","severity":"low|medium|high|critical","title":"...","file":"path or null","line":123,"evidence_snippet":"1-3 consecutive added lines from the diff","rationale":"...","suggestion":"...","confidence":0.0-1.0}]}
+{{"findings":[{{"category":"quality|testing|documentation|performance","severity":"low|medium|high|critical","title":"...","file":"path or null","line":123,"evidence_snippet":"1-3 consecutive added lines from the diff","rationale":"...","suggestion":"...","confidence":0.0-1.0}}]}}
 Focus on maintainability, missing tests, unclear APIs, error handling, and convention violations.
 Only report issues grounded in the provided diff/context.
 Always set evidence_snippet to the exact added code lines the issue refers to (no diff +/- prefixes)."""
@@ -30,12 +32,14 @@ _CATEGORY_MAP = {
 
 def build_review_prompt(pr: PullRequestContext, context_block: str, config: ReviewerConfig) -> str:
     patches = "\n\n".join(f"### {path}\n```diff\n{patch}\n```" for path, patch in pr.patches.items())
-    return (
-        f"PR: {pr.owner}/{pr.repo}#{pr.number} - {pr.title}\n\n"
-        f"Changed files: {', '.join(pr.changed_files)}\n\n"
-        f"Diffs:\n{patches}\n\n"
-        f"Relevant context:\n{context_block}\n\n"
-        f"Team conventions:\n{config.team_conventions}"
+    return build_delimited_user_prompt(
+        parts=[
+            ("pr_metadata", f"{pr.owner}/{pr.repo}#{pr.number}\nTitle: {pr.title}\nBody:\n{pr.body or ''}"),
+            ("changed_files", ", ".join(pr.changed_files)),
+            ("diffs", patches),
+            ("relevant_context", context_block),
+        ],
+        footer=f"Team conventions (trusted config):\n{config.team_conventions}",
     )
 
 

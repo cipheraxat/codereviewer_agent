@@ -13,12 +13,14 @@ from codereview.config import ReviewerConfig
 from codereview.diff_utils import evidence_from_match, redact_evidence, resolve_finding_line
 from codereview.llm import LLMClient, findings_from_payload
 from codereview.models import Finding, FindingCategory, PullRequestContext, Severity
+from codereview.prompt_utils import UNTRUSTED_SYSTEM_ADDENDUM
 
 logger = logging.getLogger(__name__)
 
-SECURITY_SYSTEM = """You are a senior application security engineer reviewing a pull request.
+SECURITY_SYSTEM = f"""You are a senior application security engineer reviewing a pull request.
+{UNTRUSTED_SYSTEM_ADDENDUM}
 Return JSON only with shape:
-{"findings":[{"category":"security","severity":"low|medium|high|critical","title":"...","file":"path or null","line":123,"evidence_snippet":"1-3 consecutive added lines from the diff","rationale":"...","suggestion":"...","confidence":0.0-1.0}]}
+{{"findings":[{{"category":"security","severity":"low|medium|high|critical","title":"...","file":"path or null","line":123,"evidence_snippet":"1-3 consecutive added lines from the diff","rationale":"...","suggestion":"...","confidence":0.0-1.0}}]}}
 Focus on authz/authn flaws, injection, secrets, unsafe deserialization, SSRF, path traversal, and insecure defaults.
 Only report issues grounded in the provided diff/context. Do not invent files or lines.
 Always set evidence_snippet to the exact added code lines the issue refers to (no diff +/- prefixes)."""

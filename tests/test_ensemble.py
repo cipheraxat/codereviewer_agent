@@ -74,7 +74,7 @@ def test_ensemble_dedupes_and_filters() -> None:
     assert llm_degraded is False
 
 
-def test_fact_check_empty_keep_drops_all() -> None:
+def test_fact_check_empty_keep_drops_weak_only() -> None:
     agent = EnsembleAgent()
     config = ReviewerConfig(ensemble={"llm_verify": False, "fact_check": True})
     pr = synthetic_pr_from_diff("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1,2 @@\n+x=1\n")
@@ -87,7 +87,7 @@ def test_fact_check_empty_keep_drops_all() -> None:
             line=1,
             rationale="wrong",
             suggestion="n/a",
-            confidence=0.9,
+            confidence=0.5,
             agent="pattern",
         )
     ]
@@ -95,6 +95,31 @@ def test_fact_check_empty_keep_drops_all() -> None:
     filtered, _, _, verdict, _ = agent.aggregate(findings, config, pr, llm)
     assert filtered == []
     assert verdict == "approve"
+
+
+def test_fact_check_empty_keep_retains_heuristic_floor() -> None:
+    agent = EnsembleAgent()
+    config = ReviewerConfig(ensemble={"llm_verify": False, "fact_check": True})
+    pr = synthetic_pr_from_diff(
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1,2 @@\n+API_KEY='secret123'\n"
+    )
+    findings = [
+        Finding(
+            category=FindingCategory.SECURITY,
+            severity=Severity.HIGH,
+            title="Possible hardcoded secret",
+            file="a.py",
+            line=1,
+            rationale="matched",
+            suggestion="use env",
+            confidence=0.85,
+            agent="security",
+        )
+    ]
+    llm = _FakeLLM([{"keep_indices": []}])
+    filtered, _, _, verdict, _ = agent.aggregate(findings, config, pr, llm)
+    assert len(filtered) == 1
+    assert verdict == "request_changes"
 
 
 def test_union_merge_keeps_heuristic_floor() -> None:

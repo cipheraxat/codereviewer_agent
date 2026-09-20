@@ -33,6 +33,7 @@ def titles_similar(left: str, right: str) -> bool:
         {"sql", "injection", "query", "interpolat"},
         {"secret", "api", "key", "hardcoded", "credential", "token"},
         {"debug", "print", "logging", "log"},
+        {"eval", "exec", "code injection"},
     ]
     for group in topic_groups:
         if any(token in a for token in group) and any(token in b for token in group):
@@ -41,9 +42,8 @@ def titles_similar(left: str, right: str) -> bool:
 
 
 def findings_overlap(left: Finding, right: Finding) -> bool:
-    if left.category != right.category:
-        return False
-    # Same location + category is enough — titles often differ across agents/packs.
+    # Same file + line is the same issue even if agents disagree on category
+    # (e.g. security vs quality both flag a hardcoded secret).
     if (
         left.file
         and right.file
@@ -53,6 +53,8 @@ def findings_overlap(left: Finding, right: Finding) -> bool:
         and left.line == right.line
     ):
         return True
+    if left.category != right.category:
+        return False
     if left.file and right.file and left.file == right.file:
         if titles_similar(left.title, right.title):
             return True
@@ -60,7 +62,7 @@ def findings_overlap(left: Finding, right: Finding) -> bool:
 
 
 def dedupe_findings(findings: list[Finding]) -> list[Finding]:
-    """Merge overlapping findings, keeping the highest-confidence item."""
+    """Merge overlapping findings, keeping the highest-confidence / severity item."""
     ranked = sorted(
         findings,
         key=lambda finding: (SEVERITY_ORDER[finding.severity], finding.confidence),

@@ -104,8 +104,16 @@ class KnowledgeIndexer:
 
         stats.documents = len(documents)
         chunk_cfg = self.config.vector.supabase
+        keep_by_source: dict[str, set[str]] = {}
 
         for doc in documents:
+            keep_by_source.setdefault(doc.source, set()).add(doc.path)
+            # Replace prior chunks for this path so content edits don't leave orphan hashes.
+            if hasattr(self.vector_store, "delete_path"):
+                try:
+                    self.vector_store.delete_path(repo_slug, doc.path, source=doc.source)
+                except Exception as exc:
+                    logger.warning("Pre-upsert path delete skipped for %s: %s", doc.path, exc)
             chunks = chunk_text(doc.content, chunk_cfg.max_chunk_chars, chunk_cfg.chunk_overlap)
             if not chunks:
                 continue
@@ -122,6 +130,18 @@ class KnowledgeIndexer:
                 )
             stats.chunks += embedded
             stats.by_source[doc.source] = stats.by_source.get(doc.source, 0) + embedded
+
+        # Drop stale JIRA/Confluence paths no longer present in this index run.
+        if hasattr(self.vector_store, "delete_missing_paths"):
+            for source, keep_paths in keep_by_source.items():
+                try:
+                    stats.deleted_paths += self.vector_store.delete_missing_paths(
+                        repo_slug,
+                        keep_paths,
+                        source=source,
+                    )
+                except Exception as exc:
+                    logger.warning("Stale path cleanup skipped for %s: %s", source, exc)
 
         return stats
 

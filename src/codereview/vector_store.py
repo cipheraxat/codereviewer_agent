@@ -115,6 +115,28 @@ class SupabaseVectorStore:
         logger.warning("Supabase embedding upsert failed after retries: %s", last_error)
         return 0
 
+    def delete_path(self, repo: str, path: str, *, source: str) -> int:
+        """Delete all embedding rows for a single path (clears stale content hashes)."""
+        if not self.available:
+            return 0
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                delete = client.delete(
+                    f"{self.url}/rest/v1/{self.config.table}",
+                    headers=self._headers(prefer=""),
+                    params={
+                        "repo": f"eq.{repo}",
+                        "path": f"eq.{path}",
+                        "source": f"eq.{source}",
+                    },
+                )
+                if delete.status_code in {200, 204}:
+                    return 1
+                logger.warning("Supabase path delete failed: %s %s", delete.status_code, delete.text[:200])
+        except httpx.HTTPError as exc:
+            logger.warning("Supabase path delete failed: %s", exc)
+        return 0
+
     def delete_missing_paths(self, repo: str, keep_paths: set[str], *, source: str = "code") -> int:
         """Delete code embeddings whose path is no longer in the current index set."""
         if not self.available:

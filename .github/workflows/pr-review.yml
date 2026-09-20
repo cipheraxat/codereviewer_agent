@@ -16,8 +16,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Pin to a published Action ref — never `./action` after checking out the PR head.
+      # A same-repo PR could otherwise rewrite action.yml and exfiltrate secrets.
+      # Prefer a commit SHA in company installs: action@<sha>
       - name: Run multi-agent PR review
-        uses: ./action
+        uses: cipheraxat/codereviewer_agent/action@main
         with:
           llm_api_key: ${{ secrets.LLM_API_KEY }}
           llm_provider: openrouter

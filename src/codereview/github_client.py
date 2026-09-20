@@ -84,6 +84,17 @@ class GitHubClient:
         existing = self._find_existing_review(pr, commit_sha, bot_marker)
         if existing is not None:
             existing.edit(body=body)
+            # Body-only edit drops new inlines; refresh them via a COMMENT review.
+            if comments:
+                try:
+                    pr.create_review(
+                        commit=repository.get_commit(commit_sha),
+                        body=f"{bot_marker}\n<!-- inline-refresh -->",
+                        event="COMMENT",
+                        comments=comments,
+                    )
+                except GithubException as exc:
+                    logger.warning("Inline refresh after review edit failed: %s", exc)
             return PostedReview(review_id=existing.id, commit_sha=commit_sha, updated=True)
 
         event = self._map_verdict(report.verdict)

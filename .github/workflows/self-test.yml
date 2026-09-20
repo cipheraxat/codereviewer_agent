@@ -42,7 +42,7 @@ jobs:
           results = json.loads(Path("benchmarks/results.json").read_text())
           summary = results["summary"]
           prod = results["production_summary"]
-          assert summary["case_count"] >= 5, summary
+          assert summary["case_count"] >= 6, summary
           assert summary["recall"] >= 0.9, summary
           assert summary["precision"] >= 0.65, summary
           assert prod["recall"] >= 0.5, prod

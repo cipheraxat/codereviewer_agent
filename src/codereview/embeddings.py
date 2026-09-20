@@ -70,4 +70,12 @@ class EmbeddingClient:
 
         client = OpenAI(**kwargs)
         response = client.embeddings.create(model=self.model, input=texts)
-        return [item.embedding for item in response.data]
+        vectors = [item.embedding for item in response.data]
+        for vector in vectors:
+            if len(vector) != EMBEDDING_DIM:
+                raise RuntimeError(
+                    f"Embedding dimension {len(vector)} != {EMBEDDING_DIM} required by "
+                    f"code_embeddings schema. Use text-embedding-3-small (or another 1536-dim model), "
+                    f"not {self.model}."
+                )
+        return vectors

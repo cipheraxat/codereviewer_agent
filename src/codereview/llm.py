@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from typing import Any
 
@@ -31,6 +32,7 @@ class LLMClient:
         self.model = settings.resolved_model()
         self.input_tokens = 0
         self.output_tokens = 0
+        self._usage_lock = threading.Lock()
 
     @property
     def available(self) -> bool:
@@ -55,6 +57,11 @@ class LLMClient:
                     time.sleep(0.5 * (attempt + 1))
         raise RuntimeError(f"LLM request failed after retries: {last_error}") from last_error
 
+    def _add_usage(self, input_tokens: int, output_tokens: int) -> None:
+        with self._usage_lock:
+            self.input_tokens += input_tokens
+            self.output_tokens += output_tokens
+
     def _anthropic_json(self, system: str, user: str) -> dict[str, Any]:
         import anthropic
 
@@ -66,8 +73,7 @@ class LLMClient:
             system=system,
             messages=[{"role": "user", "content": user}],
         )
-        self.input_tokens += response.usage.input_tokens
-        self.output_tokens += response.usage.output_tokens
+        self._add_usage(response.usage.input_tokens, response.usage.output_tokens)
         text = "".join(block.text for block in response.content if block.type == "text")
         return self._parse_json(text)
 
@@ -104,8 +110,7 @@ class LLMClient:
         )
         usage = response.usage
         if usage:
-            self.input_tokens += usage.prompt_tokens
-            self.output_tokens += usage.completion_tokens
+            self._add_usage(usage.prompt_tokens, usage.completion_tokens)
         text = response.choices[0].message.content or "{}"
         return self._parse_json(text)
 
@@ -125,7 +130,10 @@ class LLMClient:
             else:
                 rates = (0.15, 0.6)
         input_rate, output_rate = rates
-        return (self.input_tokens * input_rate + self.output_tokens * output_rate) / 1_000_000
+        with self._usage_lock:
+            input_tokens = self.input_tokens
+            output_tokens = self.output_tokens
+        return (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
 
 
 def findings_from_payload(payload: dict[str, Any], agent: str) -> list[Finding]:
