@@ -214,15 +214,15 @@ def demo(
 @app.command("index-knowledge")
 def index_knowledge(
     repo_slug: str = typer.Option(..., "--repo", help="Knowledge partition slug, e.g. owner/repo"),
-    repo_root: Path = typer.Option(Path("."), "--repo-root", help="Local checkout to index"),
+    repo_root: Path = typer.Option(Path("."), "--repo-root", help="Local checkout (unused for Atlassian-only index)"),
     config_path: Path | None = typer.Option(None, "--config", help="Path to reviewer.yaml"),
     sources: str = typer.Option(
         "",
         "--sources",
-        help="Comma-separated sources: code,jira,confluence (defaults to reviewer.yaml vector.indexing.sources)",
+        help="Comma-separated sources: jira,confluence (code is ignored). Defaults to vector.indexing.sources",
     ),
 ) -> None:
-    """Index repo code + JIRA + Confluence into Supabase for unified RAG retrieval."""
+    """Index JIRA + Confluence into Supabase for review-time RAG (repo code is never embedded)."""
     config = _load_config(config_path)
     settings = Settings()
     source_list = [s.strip() for s in sources.split(",") if s.strip()] or None

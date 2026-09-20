@@ -51,6 +51,7 @@ context:
   min_vector_snippets_before_fallback: 2
 
 # JIRA / Confluence — indexed into Supabase when external_context.enabled: true
+# Leave enabled: false if you do not want ticket/page RAG (and keep vector.enabled: false).
 external_context:
   enabled: false
   max_snippets: 4
@@ -61,7 +62,8 @@ external_context:
     projects: [CP, ENG]
     max_issues: 3
     max_index_issues: 100
-    # index_jql: "project = CP AND updated >= -30d ORDER BY updated DESC"
+    # Prefer recent tickets to bound embed cost:
+    index_jql: "project in (CP, ENG) AND updated >= -30d ORDER BY updated DESC"
   confluence:
     enabled: true
     spaces: [ENG, PLATFORM]
@@ -69,17 +71,19 @@ external_context:
     max_index_pages: 50
     follow_jira_remote_links: true
 
-# Unified RAG: batch-index all sources, query vectors at review time
+# Unified RAG: batch-index JIRA + Confluence only; query vectors at review time.
+# Repo code is never embedded (OCR select/bundle + tools + BM25 cover code).
+# To disable Supabase entirely: keep vector.enabled: false (default) and omit secrets.
 vector:
   enabled: false
   unified_rag: true
   embedding_model: openai/text-embedding-3-small
   indexing:
-    sources: [code, jira, confluence]
+    sources: [jira, confluence]   # code is ignored even if listed
   supabase:
     enabled: true
     table: code_embeddings
-    index_on_review: false
+    index_on_review: false        # ignored — code is never upserted on review
     match_threshold: 0.55
     vector_top_k: 12
 

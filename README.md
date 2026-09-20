@@ -2,12 +2,12 @@
 
 Production-style PR review pipeline for GitHub: batch-index knowledge into Supabase, retrieve relevant context at review time, run parallel security and pattern agents, ensemble the findings, and post structured review comments.
 
-**v0.5.2** — OCR-inspired precision harness on top of unified RAG (code + JIRA + Confluence):
+**v0.5.3** — OCR-inspired precision harness on top of optional Atlassian RAG (JIRA + Confluence in Supabase):
 
 | Layer | What changed |
 |---|---|
 | **Select + bundle** | Hard denylist (secrets/junk), `ignore_globs`, binary/oversized/no-hunk gates, directory bundles capped by `max_bundles` |
-| **Context** | Unified RAG + optional `file_read` / `code_search` tools (LLM only); first bundle gets full context, later bundles get a slim summary |
+| **Context** | OCR select/bundle + tools + BM25 for code; optional Supabase vectors for JIRA/Confluence only |
 | **Agents** | Language rule packs (python/ts/js/go/yaml) + heuristics; findings carry `evidence_snippet` for line re-location |
 | **Ensemble** | Semantic dedupe → optional LLM verify → OCR-style fact-check (drop only what the diff disproves) → precision posting |
 | **Safety** | Evidence redaction on all categories; `EMBEDDING_API_KEY` when chat is Anthropic; Action secrets passed as inputs |
@@ -48,7 +48,7 @@ flowchart LR
 ```
 
 1. **Trigger** — PR opened/updated or `codereview review-pr` from CLI
-2. **Index** (batch/cron) — `codereview index-knowledge` embeds repo code + JIRA + Confluence into Supabase
+2. **Index** (batch/cron, optional) — `codereview index-knowledge` embeds **JIRA + Confluence** into Supabase (repo code is never embedded)
 3. **Ingest** — fetch changed files and unified diff from GitHub
 4. **Select + bundle** — drop denied/ignored/binary/oversized files; group remaining by directory (`review.max_files_per_bundle`, `review.max_bundles`)
 5. **Retrieve** — changed-file snippets + unified vector search + BM25 fallback; optionally enrich with repo tools when an LLM is available
@@ -74,7 +74,6 @@ flowchart TD
 ```mermaid
 flowchart TD
   subgraph indexPhase [Indexing phase - batch or cron]
-    codeWalk[Walk_repo_code]
     jiraBulk[JIRA_project_search]
     confBulk[Confluence_space_pages]
     chunk[Chunk_documents]
@@ -98,7 +97,6 @@ flowchart TD
     output[PR_comments_and_report]
   end
 
-  codeWalk --> chunk
   jiraBulk --> chunk
   confBulk --> chunk
   chunk --> embed --> db
@@ -231,7 +229,7 @@ When `vector.unified_rag: true` (default), review-time retrieval is:
 
 Live JIRA/Confluence API calls are **not** made during review. Run `codereview index-knowledge` (or the `knowledge-index.yml` workflow) to refresh the index.
 
-Set `vector.unified_rag: false` to restore the legacy path: BM25 neighbors always on + optional `index_on_review` embedding + live JIRA/Confluence fetch.
+Set `vector.unified_rag: false` to restore the legacy path: BM25 neighbors always on + live JIRA/Confluence fetch at review time (prefer batch indexing instead).
 
 `ContextEngine.build_context()` merges sources, ranks by score, and returns the top N snippets (`context.max_snippets`, default 12).
 
@@ -279,14 +277,9 @@ When `review.use_tools: true` and an LLM client is available:
 - Appended as `### tool:…` blocks; truncated at the last complete block so fences stay intact
 - Skipped entirely in heuristic-only / no-key runs (no wasted I/O)
 
-#### E. Legacy: index-on-review + live Atlassian (opt-in)
+#### E. Legacy: live Atlassian (opt-in)
 
-Set `vector.unified_rag: false` to enable the v0.3 path:
-
-- **`index_on_review: true`** — embed and upsert changed/neighbor files during each review
-- **Live JIRA/Confluence** — when `external_context.enabled: true`, fetches ticket/page content at review time
-
-With the default unified RAG config, step E is skipped entirely.
+Set `vector.unified_rag: false` to enable live JIRA/Confluence fetch when `external_context.enabled: true`. Prefer batch cron indexing instead.
 
 ### Step 5 — LangGraph agent orchestration
 
@@ -432,7 +425,7 @@ See [`docs/images/github-review-example.svg`](docs/images/github-review-example.
 
 - **OCR-inspired harness** — select/bundle, hard denylist, evidence line anchoring, language rule packs, repo tools, fact-check
 - **Precision defaults** — `posting.min_confidence: 0.70`, `review.effort` (`low|medium|high`), `review.max_bundles`, `ensemble.fact_check`, opt-in CLI posting
-- **Unified RAG** — batch-index code + JIRA + Confluence into Supabase; query vectors at review time; stale path cleanup on reindex
+- **Unified RAG (optional)** — batch-index JIRA + Confluence into Supabase; repo code stays on the OCR checkout path (no code embed cost)
 - Structured findings: category, severity, file, line, evidence (redacted), rationale, suggestion, confidence
 - Hybrid context retrieval: selected files + vector search + BM25 fallback + optional tools
 - **Offline demo** — `codereview demo` with mock JIRA/Confluence and in-memory vectors (no APIs)
@@ -514,56 +507,109 @@ codereview review-pr owner/repo#123 --repo-root . --output review-report.json
 
 By default the CLI does **not** post comments. Pass `--post` to publish (requires `GITHUB_TOKEN`). Use `--dry-run` to force no posting.
 
-## Unified RAG setup
+## Unified RAG setup (JIRA / Confluence only)
 
-The recommended path: **batch-index all knowledge sources**, then **query vectors at review time**.
+Supabase holds **ticket and page** embeddings for review-time retrieval. **Repo code is never vectorized** — agents already get code from select/bundle, `file_read` / `code_search`, and BM25 neighbors on the PR checkout (cheaper and more precise than embedding the tree).
 
-1. Create a [Supabase](https://supabase.com) project (or use the CLI: `supabase projects create`)
-2. Link and push migrations:
+### Turn off Supabase / Atlassian entirely
 
-```bash
-supabase link --project-ref <your-project-ref>
-supabase db push
-```
+If your team does **not** want JIRA/Confluence context:
 
-Or run both migrations manually in the SQL editor:
+1. Keep defaults in `reviewer.yaml`:
+   ```yaml
+   vector:
+     enabled: false          # no Supabase calls at review time
+   external_context:
+     enabled: false          # no Atlassian indexing
+   ```
+2. Do **not** set `SUPABASE_*` or `ATLASSIAN_*` secrets (or omit those Action inputs).
+3. Disable or delete [`.github/workflows/knowledge-index.yml`](.github/workflows/knowledge-index.yml) in the consuming repo.
+4. PR review still works: OCR harness + heuristics/LLM on the diff only.
 
-- [`supabase/migrations/001_code_embeddings.sql`](supabase/migrations/001_code_embeddings.sql) — table + RPC
-- [`supabase/migrations/002_unified_knowledge_source.sql`](supabase/migrations/002_unified_knowledge_source.sql) — `source` column (code / jira / confluence)
+### Enable Atlassian RAG
 
-3. Set secrets / env vars:
-
-```bash
-export SUPABASE_URL=https://your-project-ref.supabase.co
-export SUPABASE_SERVICE_ROLE_KEY=eyJ...
-export LLM_API_KEY=sk-or-...
-```
-
-4. Enable in `reviewer.yaml`:
+1. Create a [Supabase](https://supabase.com) project and push migrations `001` + `002`
+2. Set secrets: `LLM_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN`, `ATLASSIAN_DOMAIN`
+3. Commit `reviewer.yaml`:
 
 ```yaml
+external_context:
+  enabled: true
+  jira:
+    enabled: true
+    projects: [CP, ENG]
+    max_index_issues: 100
+    index_jql: "project in (CP, ENG) AND updated >= -30d ORDER BY updated DESC"
+  confluence:
+    enabled: true
+    spaces: [ENG, PLATFORM]
+    max_index_pages: 50
+
 vector:
   enabled: true
   unified_rag: true
-  embedding_model: openai/text-embedding-3-small
   indexing:
-    sources: [code, jira, confluence]
+    sources: [jira, confluence]   # code is ignored even if listed
   supabase:
     enabled: true
-    index_on_review: false   # batch index via index-knowledge
-    match_threshold: 0.55
-    vector_top_k: 12
+    index_on_review: false
 ```
 
-5. Index knowledge (one-time or on a schedule):
+4. First-time backfill:
 
 ```bash
-codereview index-knowledge --repo owner/repo --repo-root .
+codereview index-knowledge --repo owner/repo --sources jira,confluence --config reviewer.yaml
 ```
 
-The [`knowledge-index.yml`](.github/workflows/knowledge-index.yml) workflow runs this on push to `main` and daily at 06:00 UTC when repo secrets are configured.
+If Supabase is unavailable at review time, the agent **falls back to changed files + BM25** automatically.
 
-If Supabase is unavailable, the agent **falls back to changed files + BM25** automatically.
+## Batch and cron indexing design
+
+```mermaid
+flowchart TB
+  subgraph reviewTime [Review time]
+    Diff[Select and bundle]
+    Tools[file_read code_search]
+    BM25[BM25 neighbors]
+    Vec[Supabase JIRA Confluence]
+    Agents[Agents]
+    Diff --> Agents
+    Tools --> Agents
+    BM25 --> Agents
+    Vec --> Agents
+  end
+  subgraph cronJob [knowledge-index.yml]
+    Sched["Daily cron 0 6 UTC"]
+    Manual[workflow_dispatch]
+    CLI[index-knowledge]
+    Jira[JIRA]
+    Conf[Confluence]
+    DB[(Supabase)]
+    Sched --> CLI
+    Manual --> CLI
+    CLI --> Jira
+    CLI --> Conf
+    Jira --> DB
+    Conf --> DB
+  end
+  DB --> Vec
+```
+
+| When | What runs | Sources |
+|---|---|---|
+| **Daily** `0 6 * * *` UTC | [`knowledge-index.yml`](.github/workflows/knowledge-index.yml) | `jira,confluence` |
+| **Manual** Actions → Knowledge Index → Run workflow | same workflow (`sources` input) | default `jira,confluence` |
+| **CLI** anytime | `codereview index-knowledge --sources jira,confluence` | as passed |
+
+**How the cron job runs**
+
+1. Checks out the repo and installs `codereview`
+2. Requires a committed `reviewer.yaml` (fails if missing — does not silently copy the example)
+3. Reads Atlassian + Supabase + LLM secrets from the environment
+4. Runs `codereview index-knowledge --repo $GITHUB_REPOSITORY --sources jira,confluence`
+5. Fetches issues/pages (capped by `max_index_*` / `index_jql`), chunks, embeds, upserts into `code_embeddings` with `source=jira|confluence`
+
+**Not indexed:** repo code (`source=code` is skipped with a warning). Push-to-main no longer triggers indexing.
 
 ### Review harness (`review:` in `reviewer.yaml`)
 
@@ -592,24 +638,12 @@ See [`reviewer.example.yaml`](reviewer.example.yaml) for a full template.
 
 | Object | Role |
 |---|---|
-| `code_embeddings` table | Chunked content + 1536-dim vectors per `owner/repo`, tagged by `source` |
+| `code_embeddings` table | Chunked content + 1536-dim vectors per `owner/repo`, tagged by `source` (`jira` / `confluence`; legacy `code` rows ignored for new indexes) |
 | `match_code_embeddings()` | RPC for cosine-similarity search filtered by repo |
 
-## Legacy: BM25 + index-on-review
+## Legacy: BM25 without vectors
 
-By default, context retrieval uses **BM25-lite** over changed files and neighbors when vectors are disabled (zero infra).
-
-To use the v0.3 incremental indexing path instead of unified RAG:
-
-```yaml
-vector:
-  enabled: true
-  unified_rag: false
-  supabase:
-    index_on_review: true
-```
-
-On each review, changed files are embedded and stored; similar chunks are retrieved for the PR query. Over time this builds a **per-repo semantic memory** in Supabase.
+By default (`vector.enabled: false`), context retrieval uses **changed files + BM25-lite neighbors** (zero Supabase infra). Live JIRA/Confluence at review time only applies when `unified_rag: false` and `external_context.enabled: true` — prefer batch indexing instead.
 
 ## JIRA / Confluence indexing (opt-in, fail-open)
 
@@ -644,7 +678,7 @@ export ATLASSIAN_API_TOKEN=...
 export ATLASSIAN_DOMAIN=yourcompany.atlassian.net
 ```
 
-If credentials are missing or Atlassian is down, indexing **skips those sources** and continues with repo code.
+If credentials are missing or Atlassian is down, indexing **skips those sources** and the review continues without ticket/page vectors.
 
 For live fetch at review time (legacy), set `vector.unified_rag: false` and `external_context.enabled: true`.
 
@@ -717,10 +751,10 @@ Reviews post as **github-actions[bot]** using the default `GITHUB_TOKEN`.
 ### Company setup checklist
 
 1. Add `reviewer.yaml` with your team's ignore paths and custom rules
-2. Create repo secrets: `LLM_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
-3. Push Supabase migrations (`001` + `002`) and run `codereview index-knowledge` once
-4. Enable the PR review workflow on `pull_request`
-5. Enable `knowledge-index.yml` for scheduled re-indexing (optional)
+2. Create repo secret `LLM_API_KEY` (required for LLM reviews)
+3. **Optional Atlassian RAG:** set `SUPABASE_*` + `ATLASSIAN_*` secrets, enable `vector` + `external_context` in YAML, push migrations, run `index-knowledge` once, keep `knowledge-index.yml` enabled for daily cron
+4. **Skip Atlassian:** leave `vector.enabled: false` / `external_context.enabled: false` and omit Supabase secrets
+5. Enable the PR review workflow on `pull_request` (pass secrets as Action inputs)
 6. Start with `dry_run: true` for one sprint, then switch to live posting
 7. Tune `severity_threshold`, `posting.min_confidence`, `review.effort`, `review.max_bundles`, and `ensemble.fact_check`
 8. Run `codereview eval` periodically to track precision/recall
@@ -734,7 +768,7 @@ This project powers PR reviews on [CopilotPulse](https://github.com/cipheraxat/C
 ```bash
 codereview review-pr owner/repo#123 [--post] [--no-post] [--dry-run] [--config reviewer.yaml]
 codereview review-diff path/to/changes.patch [--title "My change"]
-codereview index-knowledge --repo owner/repo [--sources code,jira,confluence]
+codereview index-knowledge --repo owner/repo [--sources jira,confluence]
 codereview demo [--diff path/to/diff.patch] [--fixtures-dir tests/fixtures/knowledge]
 codereview eval [--benchmark-dir benchmarks/golden] [--output benchmarks/results.json]
 codereview version
@@ -755,8 +789,8 @@ src/codereview/
   path_utils.py          # hard denylist + robust ignore_glob matching
   rule_packs.py          # language packs (python / ts / js / go / yaml)
   review_tools.py        # file_read / code_search context enrichment
-  context_engine.py      # unified RAG + BM25 fallback
-  knowledge_indexer.py   # batch index code + JIRA + Confluence (+ stale delete)
+  context_engine.py      # Atlassian RAG + BM25 fallback
+  knowledge_indexer.py   # batch index JIRA + Confluence only (code skipped)
   finding_dedupe.py      # semantic dedupe across agents
   diff_utils.py          # line numbers + evidence anchoring + redaction
   chunking.py            # overlap-safe text chunking for embeddings
@@ -780,7 +814,7 @@ tests/fixtures/knowledge/  # mock JIRA/Confluence JSON for offline demo
 benchmarks/golden/         # 5 labeled PR diffs for eval + CI gate
 .github/workflows/
   pr-review.yml
-  knowledge-index.yml
+  knowledge-index.yml    # daily cron: jira+confluence → Supabase
   self-test.yml          # pytest + dual benchmark gate
 action/
   action.yml             # secrets → inputs for composite action

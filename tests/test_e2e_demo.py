@@ -15,9 +15,10 @@ def test_demo_pipeline_indexes_mock_knowledge_and_finds_security_issues() -> Non
         fixtures_dir=fixtures_dir,
     )
 
-    assert result.index_stats.documents >= 3
+    assert result.index_stats.documents >= 2
     assert result.index_stats.by_source.get("jira", 0) >= 1
     assert result.index_stats.by_source.get("confluence", 0) >= 1
+    assert "code" not in result.index_stats.by_source
 
     retrieved_paths = {snippet.path for snippet in result.context_snippets}
     assert "jira:CP-123" in retrieved_paths or "confluence:auth-security-policy" in retrieved_paths

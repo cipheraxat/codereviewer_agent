@@ -1,11 +1,18 @@
 name: Knowledge Index
 
+# Batch-index JIRA + Confluence into Supabase for review-time RAG.
+# Repo code is NOT embedded — PR review uses select/bundle + tools + BM25 on the checkout.
+
 on:
-  push:
-    branches: [main]
   schedule:
+    # Daily 06:00 UTC — Atlassian content changes outside git
     - cron: "0 6 * * *"
   workflow_dispatch:
+    inputs:
+      sources:
+        description: "Comma-separated sources (jira,confluence). code is ignored."
+        required: false
+        default: "jira,confluence"
 
 jobs:
   index:
@@ -23,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install .
 
-      - name: Index knowledge into Supabase
+      - name: Index JIRA and Confluence into Supabase
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'openrouter' }}
@@ -34,6 +41,15 @@ jobs:
           ATLASSIAN_DOMAIN: ${{ secrets.ATLASSIAN_DOMAIN }}
         run: |
           if [[ ! -f reviewer.yaml ]]; then
-            cp reviewer.example.yaml reviewer.yaml
+            echo "::error::reviewer.yaml is required. Commit one with vector.enabled + external_context.enabled for Atlassian indexing."
+            exit 1
           fi
-          codereview index-knowledge --repo "${{ github.repository }}" --repo-root .
+          SOURCES="${{ github.event.inputs.sources }}"
+          if [[ -z "$SOURCES" ]]; then
+            SOURCES="jira,confluence"
+          fi
+          codereview index-knowledge \
+            --repo "${{ github.repository }}" \
+            --repo-root . \
+            --config reviewer.yaml \
+            --sources "$SOURCES"

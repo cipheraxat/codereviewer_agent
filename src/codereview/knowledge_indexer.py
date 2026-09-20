@@ -10,12 +10,13 @@ from codereview.config import ReviewerConfig, Settings
 from codereview.embeddings import EmbeddingClient
 from codereview.external_context import ExternalContextFetcher
 from codereview.models import KnowledgeDocument
-from codereview.path_utils import is_denied_path, should_ignore_path
 from codereview.vector_store import SupabaseVectorStore
 
 logger = logging.getLogger(__name__)
 
 EMBED_BATCH_SIZE = 32
+# Repo code is reviewed via select/bundle + tools + BM25 — never embed it (token cost).
+ALLOWED_INDEX_SOURCES = frozenset({"jira", "confluence"})
 
 
 class ExternalKnowledgeSource(Protocol):
@@ -33,7 +34,7 @@ class IndexStats:
 
 
 class KnowledgeIndexer:
-    """Batch indexer: repo code + JIRA + Confluence → vector embeddings."""
+    """Batch indexer: JIRA + Confluence → vector embeddings (code is never indexed)."""
 
     def __init__(
         self,
@@ -67,35 +68,42 @@ class KnowledgeIndexer:
                 "Vector indexing requires vector.enabled, supabase credentials, and LLM_API_KEY for embeddings"
             )
 
-        selected = {s.lower() for s in (sources or self.config.vector.indexing.sources)}
+        requested = {s.lower() for s in (sources or self.config.vector.indexing.sources)}
         stats = IndexStats(repo=repo_slug)
 
-        documents: list[KnowledgeDocument] = []
-        if "code" in selected:
-            documents.extend(self._collect_code_documents())
-        else:
+        if "code" in requested:
             stats.skipped_sources.append("code")
+            logger.warning(
+                "Skipping source=code: repo code is reviewed via select/bundle + tools + BM25 "
+                "(not embedded — avoids tokenize/embed cost). Index jira/confluence only."
+            )
 
-        if "jira" in selected or "confluence" in selected:
+        selected = requested & ALLOWED_INDEX_SOURCES
+        for name in sorted(requested - ALLOWED_INDEX_SOURCES - {"code"}):
+            stats.skipped_sources.append(name)
+            logger.warning("Skipping unknown index source: %s", name)
+
+        documents: list[KnowledgeDocument] = []
+        if selected:
             if self.config.external_context.enabled:
                 external_docs = self.external_fetcher.fetch_for_indexing()
                 for doc in external_docs:
                     if doc.source in selected:
                         documents.append(doc)
-                if "jira" not in selected:
-                    stats.skipped_sources.append("jira")
-                if "confluence" not in selected:
-                    stats.skipped_sources.append("confluence")
+                for name in sorted(ALLOWED_INDEX_SOURCES - selected):
+                    if name not in stats.skipped_sources:
+                        stats.skipped_sources.append(name)
             else:
-                if "jira" in selected:
-                    stats.skipped_sources.append("jira")
-                if "confluence" in selected:
-                    stats.skipped_sources.append("confluence")
-                logger.info("External sources requested but external_context.enabled is false")
+                for name in sorted(selected):
+                    stats.skipped_sources.append(name)
+                logger.info(
+                    "JIRA/Confluence requested but external_context.enabled is false — nothing indexed"
+                )
+        elif not stats.skipped_sources:
+            logger.info("No indexable sources selected (allowed: jira, confluence)")
 
         stats.documents = len(documents)
         chunk_cfg = self.config.vector.supabase
-        keep_paths = {doc.path for doc in documents}
 
         for doc in documents:
             chunks = chunk_text(doc.content, chunk_cfg.max_chunk_chars, chunk_cfg.chunk_overlap)
@@ -115,18 +123,6 @@ class KnowledgeIndexer:
             stats.chunks += embedded
             stats.by_source[doc.source] = stats.by_source.get(doc.source, 0) + embedded
 
-        # Drop stale rows for paths no longer in the current document set (code only —
-        # external docs may rotate by JQL and shouldn't wipe unrelated tickets mid-run).
-        if "code" in selected and hasattr(self.vector_store, "delete_missing_paths"):
-            try:
-                stats.deleted_paths = self.vector_store.delete_missing_paths(
-                    repo_slug,
-                    keep_paths,
-                    source="code",
-                )
-            except Exception as exc:
-                logger.warning("Stale path cleanup skipped: %s", exc)
-
         return stats
 
     def _vector_ready(self) -> bool:
@@ -136,35 +132,3 @@ class KnowledgeIndexer:
             and self.vector_store.available
             and self.embeddings.available
         )
-
-    def _collect_code_documents(self) -> list[KnowledgeDocument]:
-        documents: list[KnowledgeDocument] = []
-        globs = self.config.vector.indexing.code_globs
-        seen: set[str] = set()
-
-        for pattern in globs:
-            for path in self.repo_root.glob(pattern):
-                if not path.is_file():
-                    continue
-                rel_path = str(path.relative_to(self.repo_root))
-                if rel_path in seen or self._should_ignore(rel_path) or is_denied_path(rel_path):
-                    continue
-                seen.add(rel_path)
-                try:
-                    content = path.read_text(encoding="utf-8", errors="replace")
-                except OSError as exc:
-                    logger.warning("Skipping unreadable file %s: %s", rel_path, exc)
-                    continue
-                if not content.strip():
-                    continue
-                documents.append(
-                    KnowledgeDocument(
-                        path=rel_path,
-                        content=content,
-                        source="code",
-                    )
-                )
-        return documents
-
-    def _should_ignore(self, path: str) -> bool:
-        return should_ignore_path(path, self.config.ignore_globs)

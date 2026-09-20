@@ -85,7 +85,9 @@ class SupabaseConfig(BaseModel):
 
 
 class IndexingConfig(BaseModel):
-    sources: list[str] = Field(default_factory=lambda: ["code", "jira", "confluence"])
+    # Atlassian only — repo code is never embedded (OCR harness uses checkout + tools).
+    sources: list[str] = Field(default_factory=lambda: ["jira", "confluence"])
+    # Retained for backwards-compatible YAML; unused now that code indexing is disabled.
     code_globs: list[str] = Field(
         default_factory=lambda: [
             "**/*.py",

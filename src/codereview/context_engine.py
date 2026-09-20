@@ -6,7 +6,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Protocol
 
-from codereview.chunking import chunk_text
 from codereview.config import ReviewerConfig, Settings
 from codereview.embeddings import EmbeddingClient
 from codereview.external_context import ExternalContextFetcher, repo_slug
@@ -159,7 +158,6 @@ class ContextEngine:
                     score=score,
                     reason="neighbor_or_keyword_match",
                 )
-                self._maybe_index_file(pr, neighbor, content)
 
     def _unified_rag_enabled(self) -> bool:
         return self._vector_enabled() and self.config.vector.unified_rag
@@ -171,26 +169,6 @@ class ContextEngine:
             and self.vector_store.available
             and self.embeddings.available
         )
-
-    def _maybe_index_file(self, pr: PullRequestContext, rel_path: str, content: str) -> None:
-        if not self._vector_enabled() or not self.config.vector.supabase.index_on_review:
-            return
-        try:
-            chunks = chunk_text(
-                content,
-                self.config.vector.supabase.max_chunk_chars,
-                self.config.vector.supabase.chunk_overlap,
-            )
-            embeddings = self.embeddings.embed_texts(chunks)
-            self.vector_store.upsert_embeddings(
-                repo_slug(pr),
-                rel_path,
-                chunks,
-                embeddings,
-                source="code",
-            )
-        except Exception as exc:
-            logger.warning("Vector indexing skipped for %s: %s", rel_path, exc)
 
     def _vector_search(self, pr: PullRequestContext, query_terms: Counter[str]) -> list[CodeSnippet]:
         query = self._build_query_text(pr, query_terms)

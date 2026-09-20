@@ -4,25 +4,39 @@ from unittest.mock import MagicMock, patch
 from codereview.config import ExternalContextConfig, ReviewerConfig, VectorConfig
 from codereview.context_engine import ContextEngine
 from codereview.knowledge_indexer import KnowledgeIndexer
-from codereview.models import PullRequestContext
+from codereview.models import KnowledgeDocument, PullRequestContext
 
 
-def test_knowledge_indexer_collects_code_documents(tmp_path: Path) -> None:
-    repo = tmp_path
-    (repo / "src").mkdir()
-    (repo / "src" / "app.py").write_text("def main():\n    return 1\n")
-    (repo / "README.md").write_text("# App\n")
-
+def test_knowledge_indexer_skips_code_source(tmp_path: Path) -> None:
     config = ReviewerConfig(
-        vector=VectorConfig(enabled=True, supabase={"enabled": True}),
+        vector=VectorConfig(enabled=True, indexing={"sources": ["code", "jira"]}, supabase={"enabled": True}),
+        external_context=ExternalContextConfig(enabled=True),
     )
-    indexer = KnowledgeIndexer(repo, config, settings=MagicMock())
-    docs = indexer._collect_code_documents()
+    embeddings = MagicMock()
+    embeddings.available = True
+    embeddings.embed_texts.return_value = [[0.1] * 8]
+    store = MagicMock()
+    store.available = True
+    store.upsert_embeddings.return_value = 1
+    fetcher = MagicMock()
+    fetcher.fetch_for_indexing.return_value = [
+        KnowledgeDocument(path="jira:CP-1", content="Auth ticket", source="jira"),
+    ]
 
-    paths = {doc.path for doc in docs}
-    assert "src/app.py" in paths
-    assert "README.md" in paths
-    assert all(doc.source == "code" for doc in docs)
+    indexer = KnowledgeIndexer(
+        tmp_path,
+        config,
+        settings=MagicMock(),
+        embeddings=embeddings,
+        vector_store=store,
+        external_fetcher=fetcher,
+    )
+    stats = indexer.run("org/app", sources=["code", "jira"])
+
+    assert "code" in stats.skipped_sources
+    assert stats.by_source.get("jira") == 1
+    store.upsert_embeddings.assert_called()
+    assert all(call.kwargs.get("source") != "code" for call in store.upsert_embeddings.call_args_list)
 
 
 def test_unified_rag_skips_live_external_fetch(tmp_path: Path) -> None:

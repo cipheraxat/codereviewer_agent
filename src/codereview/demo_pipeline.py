@@ -52,7 +52,7 @@ def run_demo_pipeline(
         vector_store=vector_store,
         external_fetcher=mock_provider,
     )
-    index_stats = indexer.run(repo_slug, sources=["code", "jira", "confluence"])
+    index_stats = indexer.run(repo_slug, sources=["jira", "confluence"])
 
     diff_text = diff_file.read_text(encoding="utf-8")
     pr = synthetic_pr_from_diff(
