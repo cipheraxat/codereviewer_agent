@@ -1,8 +1,47 @@
 # Multi-Agent GitHub PR Reviewer
 
-Production-style PR review pipeline for GitHub: batch-index knowledge into Supabase, retrieve relevant context at review time, run parallel security and pattern agents, ensemble the findings, and post structured review comments.
+**What:** a GitHub Action that reviews every pull request and posts inline comments on risky lines: hardcoded secrets, injection, unsafe patterns, team-rule violations.<br/>
+**Why:** LLM reviewers are noisy. Every finding here is deduped, fact-checked against the diff, and posted only above a confidence threshold.<br/>
+**How:** LangGraph runs a security agent and a pattern agent in parallel over retrieved context (diff, repo tools, JIRA/Confluence in Supabase pgvector), then an ensemble verifies before posting.
 
-**v0.5.4** — OCR-inspired precision harness on top of optional Atlassian RAG (JIRA + Confluence in Supabase):
+[Live run](https://github.com/cipheraxat/CopilotPulse/pull/4) · [Quick start](#quick-start) · [How it works](#how-it-works-summary) · [GitHub Action](#github-action-company-install)
+
+## What it looks like
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/review-example-dark.png">
+  <img alt="Two inline review comments posted by the bot on a pull request: a critical hardcoded-secret finding on line 7 and a critical SQL-injection finding on line 11" src="docs/images/review-example-light.png" width="720">
+</picture>
+
+Real comments the bot posted on [CopilotPulse#4](https://github.com/cipheraxat/CopilotPulse/pull/4), a smoke-test PR seeded with intentional issues. Review summary from the same run (trimmed):
+
+> **github-actions[bot] requested changes**<br/>
+> Automated multi-agent review for `cipheraxat/CopilotPulse#4` found 5 issue(s): 2 critical, 2 high, 1 medium.<br/>
+> Overall confidence: **0.94** · Latency: 10990 ms · Estimated LLM cost (rough): $0.0014
+
+```mermaid
+flowchart LR
+  PR["PR opened / updated<br/>GitHub Actions"]
+  SEL["Select + bundle<br/>deny · ignore · size · group"]
+  CE["Context engine<br/>diff · BM25 · repo tools"]
+  KB[("Supabase pgvector<br/>JIRA + Confluence")]
+  SA["Security agent"]
+  PA["Pattern agent"]
+  EV["Ensemble<br/>dedupe · fact-check · threshold"]
+  OUT["Inline PR review<br/>+ review-report.json"]
+
+  PR --> SEL --> CE
+  KB -. daily index .-> CE
+  CE --> SA
+  CE --> PA
+  SA --> EV
+  PA --> EV
+  EV --> OUT
+```
+
+## What's new in v0.5.4
+
+OCR-inspired precision harness on top of optional Atlassian RAG (JIRA + Confluence in Supabase):
 
 | Layer | What changed |
 |---|---|
@@ -11,25 +50,6 @@ Production-style PR review pipeline for GitHub: batch-index knowledge into Supab
 | **Agents** | Language rule packs (python/ts/js/go/yaml) + heuristics; findings carry `evidence_snippet` for line re-location |
 | **Ensemble** | Semantic dedupe → optional LLM verify → OCR-style fact-check (drop only what the diff disproves) → precision posting |
 | **Safety** | Evidence redaction; untrusted PR content delimited; heuristic findings protected from fact-check wipe; Action pinned (not `./action`); RLS on embeddings |
-
-```mermaid
-flowchart LR
-  GH["GitHub PR<br/>diff + metadata"]
-  SEL["Select + Bundle<br/>deny · ignore · size · group"]
-  CE["Context Engine<br/>RAG + tools"]
-  RC["Relevant Context<br/>snippets + packs"]
-  SA["Security Agent"]
-  PA["Pattern Agent"]
-  EV["Ensemble<br/>dedupe · fact-check · verdict"]
-  OUT["GitHub Review<br/>precision-filtered comments"]
-
-  GH --> SEL --> CE --> RC
-  RC --> SA
-  RC --> PA
-  SA --> EV
-  PA --> EV
-  EV --> OUT
-```
 
 ## How it works (summary)
 
